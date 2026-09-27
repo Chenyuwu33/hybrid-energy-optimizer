@@ -8,7 +8,6 @@ import streamlit as st
 from energy_hub.config import load_config
 from energy_hub.run import run_case
 
-
 st.set_page_config(page_title="Hybrid Energy Optimizer", layout="wide")
 st.title("Hybrid Energy Optimizer")
 st.caption("Wind + battery decision-support prototype")
