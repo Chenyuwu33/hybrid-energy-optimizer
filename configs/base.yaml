@@ -1,0 +1,15 @@
+input_csv: data/sample/sample_24h.csv
+output_dir: outputs
+solver: highs
+
+battery:
+  energy_capacity_mwh: 100.0
+  charge_power_mw: 25.0
+  discharge_power_mw: 25.0
+  charge_efficiency: 0.95
+  discharge_efficiency: 0.95
+  min_soc_mwh: 10.0
+  max_soc_mwh: 100.0
+  initial_soc_mwh: 50.0
+  terminal_soc_mwh: 50.0
+  throughput_cost_eur_per_mwh: 0.0

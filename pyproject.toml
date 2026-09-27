@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hybrid-energy-optimizer"
+version = "0.1.0"
+description = "Decision-support prototype for wind-plus-battery dispatch optimization."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Chenyu Wu" }]
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "PyYAML>=6.0",
+  "scipy>=1.11",
+  "pyomo>=6.8",
+  "highspy>=1.8",
+  "plotly>=5.20",
+  "streamlit>=1.40",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.8",
+]
+gurobi = ["gurobipy>=11.0"]
+
+[project.scripts]
+energy-hub = "energy_hub.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
