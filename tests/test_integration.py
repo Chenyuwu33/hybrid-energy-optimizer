@@ -8,7 +8,6 @@ from energy_hub.cli import main
 from energy_hub.config import load_config
 from energy_hub.run import run_case
 
-
 REQUIRED_DISPATCH_COLUMNS = {
     "timestamp",
     "wind_available_mwh",
