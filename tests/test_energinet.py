@@ -1,3 +1,5 @@
+# ruff: noqa: I001
+
 from datetime import date
 
 import pandas as pd
