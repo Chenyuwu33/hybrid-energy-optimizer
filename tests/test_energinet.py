@@ -1,5 +1,3 @@
-# ruff: noqa: I001
-
 from datetime import date
 
 import pandas as pd
@@ -7,6 +5,7 @@ import pytest
 
 from energy_hub.data.energinet import (
     DAY_AHEAD_CUTOFF,
+    EnerginetClient,
     build_hourly_inputs,
     normalize_price_records,
     normalize_wind_records,
@@ -111,3 +110,38 @@ def test_build_hourly_inputs_rejects_invalid_share_or_missing_hours() -> None:
         build_hourly_inputs(prices, wind, wind_share=0.0)
     with pytest.raises(ValueError, match="overlapping"):
         build_hourly_inputs(prices, wind, wind_share=0.05)
+
+
+def test_fetch_hourly_inputs_pads_local_api_range_and_trims_to_requested_utc_days() -> None:
+    class StubClient(EnerginetClient):
+        def __init__(self) -> None:
+            self.price_call = None
+            self.wind_call = None
+
+        def fetch_hourly_prices(self, start: date, end: date, price_area: str) -> pd.DataFrame:
+            self.price_call = (start, end, price_area)
+            timestamps = pd.date_range("2025-12-31T23:00:00", periods=26, freq="h")
+            return pd.DataFrame(
+                {"timestamp": timestamps, "price_eur_mwh": [50.0] * len(timestamps)}
+            )
+
+        def fetch_hourly_wind(self, start: date, end: date, price_area: str) -> pd.DataFrame:
+            self.wind_call = (start, end, price_area)
+            timestamps = pd.date_range("2025-12-31T23:00:00", periods=26, freq="h")
+            return pd.DataFrame(
+                {"timestamp": timestamps, "dk1_wind_mwh": [1000.0] * len(timestamps)}
+            )
+
+    client = StubClient()
+    inputs = client.fetch_hourly_inputs(
+        start=date(2026, 1, 1),
+        end=date(2026, 1, 2),
+        price_area="DK1",
+        wind_share=0.05,
+    )
+
+    assert client.price_call == (date(2025, 12, 31), date(2026, 1, 3), "DK1")
+    assert client.wind_call == (date(2025, 12, 31), date(2026, 1, 3), "DK1")
+    assert len(inputs) == 24
+    assert inputs["timestamp"].iloc[0] == pd.Timestamp("2026-01-01T00:00:00")
+    assert inputs["timestamp"].iloc[-1] == pd.Timestamp("2026-01-01T23:00:00")
