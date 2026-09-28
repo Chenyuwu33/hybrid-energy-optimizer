@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hybrid-energy-optimizer"
-version = "0.1.0"
-description = "Decision-support prototype for wind-plus-battery dispatch optimization."
+version = "0.2.0"
+description = "Decision-support prototype for wind-plus-battery dispatch optimization and historical backtesting."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -14,6 +14,7 @@ dependencies = [
   "numpy>=1.26",
   "pandas>=2.1",
   "PyYAML>=6.0",
+  "requests>=2.31",
   "scipy>=1.11",
   "pyomo>=6.8",
   "highspy>=1.8",
