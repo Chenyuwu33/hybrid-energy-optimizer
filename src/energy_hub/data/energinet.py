@@ -62,10 +62,21 @@ def normalize_price_records(records: list[dict[str, Any]], dataset: str) -> pd.D
         }
     )
     if dataset == "DayAheadPrices":
-        normalized["timestamp"] = normalized["timestamp"].dt.floor("h")
-        normalized = normalized.groupby("timestamp", as_index=False)["price_eur_mwh"].mean()
+        if normalized["timestamp"].duplicated().any():
+            raise ValueError("DayAheadPrices contains duplicate 15-minute timestamps")
+        normalized["hour"] = normalized["timestamp"].dt.floor("h")
+        grouped = normalized.groupby("hour", sort=True)
+        for hour, group in grouped:
+            offsets = sorted((group["timestamp"] - hour).dt.total_seconds().astype(int).tolist())
+            if offsets != [0, 900, 1800, 2700]:
+                raise ValueError(
+                    f"DayAheadPrices requires four 15-minute prices per hour; incomplete hour: {hour}"
+                )
+        normalized = (
+            grouped["price_eur_mwh"].mean().rename_axis("timestamp").reset_index()
+        )
 
-    return normalized.sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
+    return normalized[["timestamp", "price_eur_mwh"]].sort_values("timestamp").reset_index(drop=True)
 
 
 def normalize_wind_records(records: list[dict[str, Any]]) -> pd.DataFrame:
