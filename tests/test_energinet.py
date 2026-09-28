@@ -34,6 +34,17 @@ def test_new_day_ahead_prices_are_aggregated_from_15_minutes_to_hourly() -> None
     ]
 
 
+def test_new_day_ahead_prices_reject_incomplete_quarter_hour_groups() -> None:
+    records = [
+        {"TimeUTC": "2026-01-02T00:00:00", "PriceArea": "DK1", "DayAheadPriceEUR": 10.0},
+        {"TimeUTC": "2026-01-02T00:15:00", "PriceArea": "DK1", "DayAheadPriceEUR": 20.0},
+        {"TimeUTC": "2026-01-02T00:30:00", "PriceArea": "DK1", "DayAheadPriceEUR": 30.0},
+    ]
+
+    with pytest.raises(ValueError, match="four 15-minute prices"):
+        normalize_price_records(records, dataset="DayAheadPrices")
+
+
 def test_legacy_elspot_prices_remain_hourly() -> None:
     records = [
         {"HourUTC": "2025-09-29T22:00:00", "PriceArea": "DK1", "SpotPriceEUR": 42.5},
