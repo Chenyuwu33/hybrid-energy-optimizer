@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import pandas as pd
@@ -63,9 +63,7 @@ def normalize_price_records(records: list[dict[str, Any]], dataset: str) -> pd.D
     )
     if dataset == "DayAheadPrices":
         normalized["timestamp"] = normalized["timestamp"].dt.floor("h")
-        normalized = (
-            normalized.groupby("timestamp", as_index=False)["price_eur_mwh"].mean()
-        )
+        normalized = normalized.groupby("timestamp", as_index=False)["price_eur_mwh"].mean()
 
     return normalized.sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
 
@@ -212,8 +210,7 @@ class EnerginetClient:
             columns=columns,
             sort="HourUTC asc",
         )
-        wind = normalize_wind_records(records)
-        return wind.rename(columns={"dk1_wind_mwh": "dk1_wind_mwh"})
+        return normalize_wind_records(records)
 
     def fetch_hourly_inputs(
         self,
@@ -222,6 +219,23 @@ class EnerginetClient:
         price_area: str,
         wind_share: float,
     ) -> pd.DataFrame:
-        prices = self.fetch_hourly_prices(start, end, price_area)
-        wind = self.fetch_hourly_wind(start, end, price_area)
-        return build_hourly_inputs(prices, wind, wind_share)
+        """Fetch enough Danish-local data to return exact end-exclusive UTC calendar days."""
+        if start >= end:
+            raise ValueError("start must be before end")
+
+        # Energi Data Service interprets bare start/end dates in Danish local time.
+        # Pad the API request, then trim after converting the records' explicit UTC fields.
+        api_start = start - timedelta(days=1)
+        api_end = end + timedelta(days=1)
+        prices = self.fetch_hourly_prices(api_start, api_end, price_area)
+        wind = self.fetch_hourly_wind(api_start, api_end, price_area)
+        inputs = build_hourly_inputs(prices, wind, wind_share)
+
+        utc_start = pd.Timestamp(start.isoformat())
+        utc_end = pd.Timestamp(end.isoformat())
+        trimmed = inputs.loc[
+            (inputs["timestamp"] >= utc_start) & (inputs["timestamp"] < utc_end)
+        ].reset_index(drop=True)
+        if trimmed.empty:
+            raise ValueError("Energinet data contains no records in the requested UTC period")
+        return trimmed
