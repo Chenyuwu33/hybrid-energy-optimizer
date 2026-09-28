@@ -14,6 +14,7 @@ dependencies = [
   "numpy>=1.26",
   "pandas>=2.1",
   "PyYAML>=6.0",
+  "requests>=2.31",
   "scipy>=1.11",
   "pyomo>=6.8",
   "highspy>=1.8",
