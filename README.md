@@ -136,11 +136,11 @@ The historical workflow uses the official [Energinet Energi Data Service](https:
 
 ### Electricity prices
 
-Energinet's legacy `Elspotprices` series stopped updating after September 2025. Current `DayAheadPrices` data use a 15-minute market time unit. Because the current optimizer is still hourly, v0.2 averages the four 15-minute day-ahead prices within each UTC hour before optimization.
+Energinet's legacy `Elspotprices` series stopped updating after September 2025. Current `DayAheadPrices` data use a 15-minute market time unit. Because the current optimizer is still hourly, v0.2 averages the four 15-minute day-ahead prices within each UTC hour before optimization. Incomplete quarter-hour groups are rejected instead of being silently averaged.
 
 ### Wind production
 
-The project uses settled wind-production fields from `ProductionConsumptionSettlement` and sums the available onshore/offshore wind categories for DK1.
+The project uses settled wind-production fields from `ProductionConsumptionSettlement` and sums the available onshore/offshore wind categories for DK1. Settlement data are published with a delay rather than in real time, so historical backtests should use periods sufficiently far in the past to ensure the wind series is available.
 
 The current model **does not claim that DK1 aggregate production represents a specific wind farm**. The `--wind-share` parameter is an explicit scenario assumption. For example:
 
@@ -266,6 +266,7 @@ The automated suite covers, among other things:
 - energy balance and SOC constraints,
 - solver behavior,
 - legacy hourly and current 15-minute Energinet price normalization,
+- rejection of incomplete 15-minute price groups,
 - DK1 wind-category aggregation,
 - Danish-local API range to UTC-day trimming,
 - scenario wind-share scaling,
