@@ -1,5 +1,4 @@
 import pandas as pd
-
 from dashboard.components.charts import (
     daily_battery_value_figure,
     daily_cycles_figure,
