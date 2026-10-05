@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+
 from energy_hub.data.wind_capacity import (
     DK1_MUNICIPALITY_CODES,
     aggregate_dk1_onshore_wind_capacity,
