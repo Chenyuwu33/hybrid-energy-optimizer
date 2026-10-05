@@ -11,3 +11,8 @@ outputs/
 .env
 .env.*
 .DS_Store
+
+# Python package/build metadata
+*.egg-info/
+build/
+dist/

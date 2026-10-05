@@ -26,5 +26,8 @@ jobs:
       - name: Test
         run: pytest -q
 
+      - name: Compile source and dashboard
+        run: python -m compileall -q src dashboard
+
       - name: Run sample case
         run: energy-hub run --config configs/base.yaml --solver highs

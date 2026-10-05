@@ -8,6 +8,7 @@ The repository is designed as a reusable foundation for energy analytics and opt
 
 - **v0.1:** synthetic 24-hour wind + BESS dispatch optimization
 - **v0.2:** historical DK1 data ingestion from Energinet and daily backtesting
+- **v0.2.1:** interactive historical Streamlit dashboard with wind-farm and BESS sizing inputs
 
 > **Important:** this is an educational and decision-support prototype. It is not operational, trading, investment, or safety advice for any real asset.
 
@@ -22,10 +23,11 @@ For every hourly time step, the optimizer decides how available wind energy is s
 
 It respects battery power, energy, efficiency, SOC, terminal-SOC, and optional throughput-cost constraints.
 
-The project now supports two workflows:
+The project supports three user workflows:
 
 1. **Single-case optimization** from a local hourly CSV.
-2. **Historical DK1 backtesting** using official Energinet Energi Data Service data.
+2. **Historical DK1 CLI backtesting** using official Energinet data and the v0.2 `wind_share` scenario assumption.
+3. **Interactive historical DK1 dashboard backtesting** using a hypothetical onshore wind-farm rated capacity and user-defined BESS size.
 
 ## Architecture
 
@@ -34,9 +36,8 @@ The project now supports two workflows:
             +---------+----------+
             |                    |
       local CSV             Energinet API
-            |                    |
-            |             price + wind data
-            |                    |
+            |             price / wind /
+            |           installed capacity
             +----------+---------+
                        |
                        v
@@ -67,7 +68,7 @@ The project now supports two workflows:
                 CLI      Streamlit
 ```
 
-Core calculations live under `src/energy_hub/`. Presentation code does not contain optimization equations.
+Core calculations live under `src/energy_hub/`. Streamlit collects inputs and displays results; it does not duplicate optimization equations.
 
 ## Quick start
 
@@ -85,7 +86,7 @@ python -m pip install -e ".[dev]"
 
 Python 3.11 or newer is required.
 
-### 2. Run the synthetic v0.1 case
+### 2. Run the synthetic reference case
 
 ```bash
 energy-hub run --config configs/base.yaml --solver highs
@@ -98,9 +99,9 @@ outputs/dispatch.csv
 outputs/kpis.json
 ```
 
-### 3. Run a historical DK1 backtest
+### 3. Run the v0.2-compatible historical CLI backtest
 
-The command below downloads official historical market and settlement data from Energinet and replays seven complete UTC days:
+The command below replays seven complete UTC days using a hypothetical portfolio equal to 5% of aggregate settled DK1 wind production:
 
 ```bash
 energy-hub backtest \
@@ -112,7 +113,7 @@ energy-hub backtest \
   --solver highs
 ```
 
-On Windows Command Prompt, put the command on one line or replace the line-continuation syntax as appropriate.
+On Windows Command Prompt, put the command on one line or use CMD's `^` line-continuation syntax rather than `\`.
 
 Outputs:
 
@@ -128,45 +129,112 @@ The summary separates three strategies:
 - **Curtail-negative baseline:** export wind when the hourly price is non-negative and curtail at negative prices.
 - **Optimized:** coordinate wind, curtailment, and the battery using the dispatch optimizer.
 
-This separation makes `battery_incremental_vs_curtail_eur` more meaningful than the original v0.1 uplift, because it does not credit the battery for the simple decision to avoid negative-price export.
+`battery_incremental_vs_curtail_eur` isolates modeled battery value from the simpler decision to avoid negative-price export.
+
+### 4. Launch the v0.2.1 dashboard
+
+```bash
+streamlit run dashboard/app.py
+```
+
+The dashboard contains two tabs:
+
+#### Sample Dispatch
+
+Preserves the transparent v0.1 synthetic case. Users can change BESS energy, charge/discharge power, initial/terminal SOC, and solver, then inspect revenue, cycling, dispatch, and SOC.
+
+#### Historical DK1 Backtest
+
+Users can choose:
+
+- start and end date (`end` is exclusive),
+- hypothetical **onshore** wind-farm capacity in MW,
+- BESS energy capacity in MWh,
+- charge and discharge power in MW,
+- initial and terminal SOC in percent,
+- HiGHS or Gurobi.
+
+The dashboard reports:
+
+- days backtested,
+- total modeled wind energy,
+- sell-all baseline revenue,
+- curtail-negative baseline revenue,
+- optimized revenue,
+- battery incremental value,
+- total uplift versus sell-all,
+- equivalent full cycles,
+- historical wind/price chart,
+- daily battery-value chart,
+- daily revenue comparison,
+- daily cycling,
+- and the daily result table.
 
 ## Real-data methodology and limitations
 
-The historical workflow uses the official [Energinet Energi Data Service](https://www.energidataservice.dk/guides/api-guides).
+The historical workflows use the official Energinet Energi Data Service.
 
 ### Electricity prices
 
-Energinet's legacy `Elspotprices` series stopped updating after September 2025. Current `DayAheadPrices` data use a 15-minute market time unit. Because the current optimizer is still hourly, v0.2 averages the four 15-minute day-ahead prices within each UTC hour before optimization. Incomplete quarter-hour groups are rejected instead of being silently averaged.
+Legacy `Elspotprices` data are used before October 2025. From October 2025, `DayAheadPrices` use a 15-minute market time unit. Because the optimizer is currently hourly, the four complete quarter-hour prices within each UTC hour are averaged. Missing or duplicate quarter-hour groups are rejected rather than silently averaged.
 
-### Wind production
+### Wind production: two explicit scenario paths
 
-The project uses settled wind-production fields from `ProductionConsumptionSettlement` and sums the available onshore/offshore wind categories for DK1. Settlement data are published with a delay rather than in real time, so historical backtests should use periods sufficiently far in the past to ensure the wind series is available.
+The project deliberately keeps two different historical scaling assumptions separate.
 
-The current model **does not claim that DK1 aggregate production represents a specific wind farm**. The `--wind-share` parameter is an explicit scenario assumption. For example:
+**CLI `--wind-share` path:**
+
+The v0.2-compatible CLI sums the available settled onshore and offshore DK1 wind-production categories and applies an explicit portfolio share. For example, `--wind-share 0.05` means a hypothetical portfolio whose hourly production is 5% of aggregate settled DK1 wind production. It is not a specific physical wind farm.
+
+**Dashboard wind-capacity path:**
+
+v0.2.1 gives users the more intuitive input `wind_capacity_mw`. This pathway uses:
+
+1. settled **DK1 onshore** hourly wind production,
+2. monthly municipality-level onshore installed wind capacity,
+3. an explicit West Denmark/DK1 municipality mapping,
+4. a regional hourly onshore capacity factor,
+5. scaling of that regional profile to the selected hypothetical wind-farm MW.
+
+For hour `t` in month `m`:
 
 ```text
---wind-share 0.05
+regional_cf[t]
+  = DK1_onshore_generation_mwh[t]
+  / DK1_onshore_installed_capacity_mw[m]
+
+hypothetical_wind_mwh[t]
+  = regional_cf[t] * wind_capacity_mw
 ```
 
-means:
+This is a **regional-profile approximation**, not SCADA data from an individual wind farm. Regional aggregation smooths spatial variability and should not be interpreted as a site-specific production trace.
 
-> model a hypothetical portfolio whose hourly output profile is 5% of the settled aggregate DK1 wind-production profile.
-
-A future asset-specific study should replace this scaling assumption with real SCADA, metered production, or a site-specific wind/power model.
+The capacity-based v0.2.1 path is intentionally onshore-only. Offshore capacity records are not forced into a municipality-based DK1 mapping when their location encoding is ambiguous. A future offshore study should use an explicit offshore asset/price-area mapping.
 
 ### Historical replay, not live trading
 
-The daily backtest is a **perfect-information historical benchmark**: each day's realized historical prices and wind values are known to the optimizer. It therefore measures the value available under perfect foresight and should not be presented as achievable live-trading performance.
+The daily backtest is a **perfect-information historical benchmark**: each day's realized historical prices and wind values are known to the optimizer. It measures an upper-bound-like operational value under the current assumptions and should not be presented as achievable live-trading PnL.
 
-Future versions will introduce forecast errors and rolling-horizon decisions.
+### Current economic and grid limitations
+
+v0.2.1 still does not model several effects needed for an investment-grade study, including:
+
+- battery degradation economics beyond the configurable generic throughput-cost hook,
+- grid-connection export limits,
+- forecast error and rolling-horizon operation,
+- imbalance settlement,
+- intraday/balancing/reserve-market participation,
+- site-specific SCADA or wake/power-curve modeling.
+
+These limitations are also shown inside the historical dashboard.
 
 ### Time handling
 
-Energi Data Service interprets bare API `start`/`end` values in Danish local time. v0.2 pads the requested API range, converts the datasets' UTC timestamp fields, and then trims the merged data to exact end-exclusive UTC calendar days before backtesting.
+Energi Data Service interprets bare API `start`/`end` values in Danish local time. The client pads API requests, normalizes explicit UTC timestamp fields, and trims the data to exact end-exclusive UTC calendar days before backtesting. The daily runner requires exactly 24 hourly records per UTC day.
 
 ## Synthetic reference result
 
-A reference run of the included synthetic v0.1 case produced approximately:
+A reference run of the included synthetic case produced approximately:
 
 | KPI | Value |
 |---|---:|
@@ -175,7 +243,7 @@ A reference run of the included synthetic v0.1 case produced approximately:
 | Revenue uplift | €14,084 |
 | Solver status | optimal |
 
-These figures are only a reproducibility check for the synthetic sample and are not an estimate of commercial battery returns.
+These figures are only a reproducibility check for the synthetic sample and are not a commercial-return estimate.
 
 ## Mathematical formulation
 
@@ -203,25 +271,6 @@ sum(price[t] * grid_export[t])
 
 The battery can currently charge from wind only. Grid-to-battery arbitrage is deliberately left for a later market-focused extension.
 
-## Dashboard
-
-Launch the interactive synthetic-case dashboard:
-
-```bash
-streamlit run dashboard/app.py
-```
-
-The v0.2 historical workflow is currently CLI-first. A later dashboard update will add date-range selection and historical backtest visualization after the data/backend behavior is stable.
-
-## Optional Gurobi
-
-If you have a valid Gurobi installation/license:
-
-```bash
-python -m pip install -e ".[gurobi]"
-energy-hub run --config configs/base.yaml --solver gurobi
-```
-
 ## Project structure
 
 ```text
@@ -229,16 +278,23 @@ hybrid-energy-optimizer/
 ├── src/energy_hub/
 │   ├── assets/
 │   ├── backtesting/
-│   │   └── runner.py
+│   │   ├── runner.py
+│   │   └── service.py
 │   ├── data/
 │   │   ├── energinet.py
-│   │   └── io.py
+│   │   ├── io.py
+│   │   └── wind_capacity.py
 │   ├── economics/
 │   ├── optimization/
+│   ├── presentation/
+│   │   └── charts.py
 │   ├── cli.py
 │   ├── config.py
 │   └── run.py
-├── dashboard/app.py
+├── dashboard/
+│   ├── app.py
+│   ├── sample_dispatch.py
+│   └── historical_backtest.py
 ├── configs/base.yaml
 ├── data/sample/sample_24h.csv
 ├── case_studies/
@@ -255,8 +311,10 @@ hybrid-energy-optimizer/
 Run:
 
 ```bash
-pytest -q
 ruff check .
+pytest -q
+python -m compileall -q src dashboard
+energy-hub run --config configs/base.yaml --solver highs
 ```
 
 The automated suite covers, among other things:
@@ -265,34 +323,38 @@ The automated suite covers, among other things:
 - battery parameter validation,
 - energy balance and SOC constraints,
 - solver behavior,
-- legacy hourly and current 15-minute Energinet price normalization,
-- rejection of incomplete 15-minute price groups,
-- DK1 wind-category aggregation,
+- legacy hourly and current 15-minute price normalization,
+- rejection of incomplete quarter-hour price groups,
+- aggregate and onshore DK1 wind normalization,
 - Danish-local API range to UTC-day trimming,
-- scenario wind-share scaling,
-- daily historical replay,
-- improved economic baselines,
+- legacy wind-share scaling,
+- municipality-based DK1 onshore installed-capacity aggregation,
+- regional capacity-factor and hypothetical wind-farm scaling,
+- missing-capacity and impossible-capacity-factor rejection,
+- historical dashboard request validation and SOC conversion,
+- daily replay and economic baselines,
+- pure chart-helper output,
 - CLI file generation,
-- and presentation-layer isolation.
+- and package/project version synchronization.
 
-GitHub Actions installs the project on Python 3.11, runs Ruff and Pytest, and runs the original deterministic sample case. CI does not call the live Energinet API, so temporary external API/network outages do not make the repository test suite flaky.
+GitHub Actions installs the project on Python 3.11, runs Ruff and Pytest, and runs the deterministic synthetic sample. CI deliberately does not call the live Energinet API, so temporary external API/network outages do not make the test suite flaky.
 
 ## Docker
 
 Build:
 
 ```bash
-docker build -t hybrid-energy-optimizer:0.2 .
+docker build -t hybrid-energy-optimizer:0.2.1 .
 ```
 
 Run the included synthetic case:
 
 ```bash
-docker run --rm hybrid-energy-optimizer:0.2 \
+docker run --rm hybrid-energy-optimizer:0.2.1 \
   energy-hub run --config configs/base.yaml --solver highs
 ```
 
-A live Energinet backtest also requires network access from the container.
+A live Energinet backtest requires network access from the container.
 
 ## Roadmap
 
@@ -302,18 +364,19 @@ Completed foundation:
 - [x] CLI / Streamlit / tests / CI / Docker
 - [x] Energinet historical price and settlement-data ingestion
 - [x] Historical daily backtesting with multiple baselines
+- [x] Interactive historical DK1 dashboard with capacity-based onshore profile scaling
 
-Next candidates:
+Next priorities:
 
-1. Persist normalized data in PostgreSQL and cache API responses
-2. Add battery degradation economics and BESS sizing studies
-3. Add historical backtest views to Streamlit
-4. Add wind- and price-forecast models and quantify forecast economic value
-5. Add rolling-horizon optimization under forecast error
-6. Add day-ahead / intraday / balancing-market extensions
-7. Add electrolyzer and hydrogen-production optimization
-8. Add SCADA and renewable-asset performance analytics
-9. Add grid constraints and optimal power flow
+1. Add battery degradation economics and BESS sizing sensitivity
+2. Add a grid-connection export limit
+3. Add hourly historical dispatch export and deeper diagnostic views
+4. Persist/cache normalized market data
+5. Add wind- and price-forecast models and quantify forecast economic value
+6. Add rolling-horizon optimization under forecast error
+7. Add day-ahead / intraday / balancing-market extensions
+8. Add electrolyzer and hydrogen-production optimization
+9. Add grid constraints, ED/DC-OPF, and congestion analysis
 10. Add cloud deployment and API service layer
 
 ## Case studies
