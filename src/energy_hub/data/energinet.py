@@ -11,6 +11,12 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from energy_hub.data.wind_capacity import (
+    aggregate_dk1_onshore_wind_capacity,
+    normalize_capacity_records,
+    scale_dk1_onshore_wind_to_farm,
+)
+
 DAY_AHEAD_CUTOFF = date(2025, 10, 1)
 BASE_URL = "https://api.energidataservice.dk/dataset"
 
@@ -24,6 +30,7 @@ _WIND_COLUMNS = [
     "OnshoreWindGe50kW_MWh",
     "OnshoreWindLt50kW_MWh",
 ]
+_ONSHORE_WIND_COLUMNS = ["OnshoreWindGe50kW_MWh", "OnshoreWindLt50kW_MWh"]
 
 
 def price_datasets_for_period(start: date, end: date) -> list[str]:
@@ -40,6 +47,12 @@ def price_datasets_for_period(start: date, end: date) -> list[str]:
 def _utc_naive(values: pd.Series) -> pd.Series:
     timestamps = pd.to_datetime(values, utc=True, errors="raise")
     return timestamps.dt.tz_convert(None)
+
+
+def _first_day_of_next_month(value: date) -> date:
+    if value.month == 12:
+        return date(value.year + 1, 1, 1)
+    return date(value.year, value.month + 1, 1)
 
 
 def normalize_price_records(records: list[dict[str, Any]], dataset: str) -> pd.DataFrame:
@@ -83,9 +96,10 @@ def normalize_price_records(records: list[dict[str, Any]], dataset: str) -> pd.D
 
 
 def normalize_wind_records(records: list[dict[str, Any]]) -> pd.DataFrame:
-    """Sum settled DK wind categories into one hourly aggregate wind-production series."""
+    """Normalize aggregate and onshore settled wind production to hourly series."""
+    columns = ["timestamp", "dk1_wind_mwh", "dk1_onshore_wind_mwh"]
     if not records:
-        return pd.DataFrame(columns=["timestamp", "dk1_wind_mwh"])
+        return pd.DataFrame(columns=columns)
     raw = pd.DataFrame(records)
     missing = {"HourUTC", *_WIND_COLUMNS} - set(raw.columns)
     if missing:
@@ -96,6 +110,7 @@ def normalize_wind_records(records: list[dict[str, Any]]) -> pd.DataFrame:
         {
             "timestamp": _utc_naive(raw["HourUTC"]),
             "dk1_wind_mwh": numeric.sum(axis=1),
+            "dk1_onshore_wind_mwh": numeric[_ONSHORE_WIND_COLUMNS].sum(axis=1),
         }
     )
     return result.sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
@@ -156,18 +171,21 @@ class EnerginetClient:
         *,
         start: date,
         end: date,
-        price_area: str,
+        price_area: str | None,
         columns: list[str],
         sort: str,
     ) -> list[dict[str, Any]]:
-        params = {
+        params: dict[str, Any] = {
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "filter": json.dumps({"PriceArea": [price_area]}, separators=(",", ":")),
             "columns": ",".join(columns),
             "sort": sort,
             "limit": 0,
         }
+        if price_area is not None:
+            params["filter"] = json.dumps(
+                {"PriceArea": [price_area]}, separators=(",", ":")
+            )
         response = self.session.get(
             f"{BASE_URL}/{dataset}",
             params=params,
@@ -226,6 +244,18 @@ class EnerginetClient:
         )
         return normalize_wind_records(records)
 
+    def fetch_monthly_wind_capacity(self, start: date, end: date) -> pd.DataFrame:
+        """Fetch monthly DK1 onshore installed capacity from municipality records."""
+        records = self.fetch_dataset(
+            "CapacityPerMunicipality",
+            start=start,
+            end=end,
+            price_area=None,
+            columns=["Month", "MunicipalityNo", "OnshoreWindCapacity"],
+            sort="Month asc",
+        )
+        return aggregate_dk1_onshore_wind_capacity(normalize_capacity_records(records))
+
     def fetch_hourly_inputs(
         self,
         start: date,
@@ -244,6 +274,44 @@ class EnerginetClient:
         prices = self.fetch_hourly_prices(api_start, api_end, price_area)
         wind = self.fetch_hourly_wind(api_start, api_end, price_area)
         inputs = build_hourly_inputs(prices, wind, wind_share)
+
+        utc_start = pd.Timestamp(start.isoformat())
+        utc_end = pd.Timestamp(end.isoformat())
+        trimmed = inputs.loc[
+            (inputs["timestamp"] >= utc_start) & (inputs["timestamp"] < utc_end)
+        ].reset_index(drop=True)
+        if trimmed.empty:
+            raise ValueError("Energinet data contains no records in the requested UTC period")
+        return trimmed
+
+    def fetch_hourly_inputs_for_capacity(
+        self,
+        start: date,
+        end: date,
+        price_area: str,
+        wind_capacity_mw: float,
+    ) -> pd.DataFrame:
+        """Return exact UTC-day inputs for a hypothetical DK1 onshore wind farm."""
+        if start >= end:
+            raise ValueError("start must be before end")
+        if price_area != "DK1":
+            raise ValueError("capacity-based wind normalization currently supports DK1 only")
+
+        api_start = start - timedelta(days=1)
+        api_end = end + timedelta(days=1)
+        prices = self.fetch_hourly_prices(api_start, api_end, price_area)
+        wind = self.fetch_hourly_wind(api_start, api_end, price_area)
+
+        capacity_start = date(start.year, start.month, 1)
+        last_requested_day = end - timedelta(days=1)
+        capacity_end = _first_day_of_next_month(last_requested_day)
+        capacity = self.fetch_monthly_wind_capacity(capacity_start, capacity_end)
+        scaled_wind = scale_dk1_onshore_wind_to_farm(wind, capacity, wind_capacity_mw)
+
+        inputs = prices.merge(scaled_wind, on="timestamp", how="inner", validate="one_to_one")
+        if inputs.empty:
+            raise ValueError("price and scaled wind datasets have no overlapping hourly timestamps")
+        inputs = inputs[["timestamp", "wind_mwh", "price_eur_mwh"]].sort_values("timestamp")
 
         utc_start = pd.Timestamp(start.isoformat())
         utc_end = pd.Timestamp(end.isoformat())
