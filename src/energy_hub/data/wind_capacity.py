@@ -101,7 +101,8 @@ def aggregate_dk1_onshore_wind_capacity(capacity: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"capacity table missing required columns: {sorted(missing)}")
 
-    selected = capacity.loc[capacity["municipality_no"].astype(str).isin(DK1_MUNICIPALITY_CODES)].copy()
+    in_dk1 = capacity["municipality_no"].astype(str).isin(DK1_MUNICIPALITY_CODES)
+    selected = capacity.loc[in_dk1].copy()
     if selected.empty:
         return pd.DataFrame(columns=["month", "dk1_onshore_capacity_mw"])
 
@@ -141,7 +142,8 @@ def scale_dk1_onshore_wind_to_farm(
     merged = hourly.merge(capacity, on="month", how="left", validate="many_to_one")
 
     if merged["dk1_onshore_capacity_mw"].isna().any():
-        missing_months = sorted(merged.loc[merged["dk1_onshore_capacity_mw"].isna(), "month"].unique())
+        missing_mask = merged["dk1_onshore_capacity_mw"].isna()
+        missing_months = sorted(merged.loc[missing_mask, "month"].unique())
         raise ValueError(f"missing DK1 installed capacity for month(s): {missing_months}")
     if (merged["dk1_onshore_capacity_mw"] <= 0).any():
         raise ValueError("DK1 installed capacity must be positive")
