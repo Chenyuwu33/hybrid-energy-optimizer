@@ -1,5 +1,6 @@
 import pandas as pd
-from dashboard.components.charts import (
+
+from energy_hub.presentation.charts import (
     daily_battery_value_figure,
     daily_cycles_figure,
     daily_revenue_figure,
