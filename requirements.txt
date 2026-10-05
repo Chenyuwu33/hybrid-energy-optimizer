@@ -1,0 +1,4 @@
+# Streamlit Community Cloud deployment dependencies.
+# Installing the repository itself keeps runtime dependencies sourced from pyproject.toml
+# and makes the src/energy_hub package importable by dashboard/app.py.
+-e .
