@@ -55,6 +55,14 @@ def _first_day_of_next_month(value: date) -> date:
     return date(value.year, value.month + 1, 1)
 
 
+def _trim_utc_period(frame: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    utc_start = pd.Timestamp(start.isoformat())
+    utc_end = pd.Timestamp(end.isoformat())
+    return frame.loc[
+        (frame["timestamp"] >= utc_start) & (frame["timestamp"] < utc_end)
+    ].reset_index(drop=True)
+
+
 def normalize_price_records(records: list[dict[str, Any]], dataset: str) -> pd.DataFrame:
     """Normalize legacy hourly or current 15-minute day-ahead prices to hourly EUR/MWh."""
     if dataset not in _PRICE_COLUMNS:
@@ -275,11 +283,7 @@ class EnerginetClient:
         wind = self.fetch_hourly_wind(api_start, api_end, price_area)
         inputs = build_hourly_inputs(prices, wind, wind_share)
 
-        utc_start = pd.Timestamp(start.isoformat())
-        utc_end = pd.Timestamp(end.isoformat())
-        trimmed = inputs.loc[
-            (inputs["timestamp"] >= utc_start) & (inputs["timestamp"] < utc_end)
-        ].reset_index(drop=True)
+        trimmed = _trim_utc_period(inputs, start, end)
         if trimmed.empty:
             raise ValueError("Energinet data contains no records in the requested UTC period")
         return trimmed
@@ -302,22 +306,24 @@ class EnerginetClient:
         prices = self.fetch_hourly_prices(api_start, api_end, price_area)
         wind = self.fetch_hourly_wind(api_start, api_end, price_area)
 
+        requested_prices = _trim_utc_period(prices, start, end)
+        requested_wind = _trim_utc_period(wind, start, end)
+        if requested_prices.empty or requested_wind.empty:
+            raise ValueError("Energinet data contains no records in the requested UTC period")
+
         capacity_start = date(start.year, start.month, 1)
         last_requested_day = end - timedelta(days=1)
         capacity_end = _first_day_of_next_month(last_requested_day)
         capacity = self.fetch_monthly_wind_capacity(capacity_start, capacity_end)
-        scaled_wind = scale_dk1_onshore_wind_to_farm(wind, capacity, wind_capacity_mw)
+        scaled_wind = scale_dk1_onshore_wind_to_farm(
+            requested_wind, capacity, wind_capacity_mw
+        )
 
-        inputs = prices.merge(scaled_wind, on="timestamp", how="inner", validate="one_to_one")
+        inputs = requested_prices.merge(
+            scaled_wind, on="timestamp", how="inner", validate="one_to_one"
+        )
         if inputs.empty:
             raise ValueError("price and scaled wind datasets have no overlapping hourly timestamps")
-        inputs = inputs[["timestamp", "wind_mwh", "price_eur_mwh"]].sort_values("timestamp")
-
-        utc_start = pd.Timestamp(start.isoformat())
-        utc_end = pd.Timestamp(end.isoformat())
-        trimmed = inputs.loc[
-            (inputs["timestamp"] >= utc_start) & (inputs["timestamp"] < utc_end)
-        ].reset_index(drop=True)
-        if trimmed.empty:
-            raise ValueError("Energinet data contains no records in the requested UTC period")
-        return trimmed
+        return inputs[["timestamp", "wind_mwh", "price_eur_mwh"]].sort_values(
+            "timestamp"
+        ).reset_index(drop=True)
