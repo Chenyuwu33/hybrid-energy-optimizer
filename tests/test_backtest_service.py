@@ -2,12 +2,12 @@ from datetime import date
 
 import pandas as pd
 import pytest
-
 from energy_hub.backtesting.service import (
     HistoricalBacktestRequest,
     build_battery_from_request,
     run_historical_backtest,
 )
+
 from energy_hub.config import load_config
 
 
