@@ -98,3 +98,19 @@ def test_daily_backtest_values_grid_arbitrage_on_windless_days() -> None:
     assert with_grid.summary["grid_import_mwh"] > 0
     assert with_grid.summary["battery_incremental_vs_curtail_eur"] > 0
     assert (with_grid.daily["grid_import_mwh"] > 0).all()
+
+
+def test_daily_backtest_reports_degradation_cost() -> None:
+    from dataclasses import replace
+
+    worn = replace(_battery(), degradation_cost_eur_per_mwh=5.0)
+
+    result = run_daily_backtest(_two_day_inputs(), worn, solver="highs")
+    plain = run_daily_backtest(_two_day_inputs(), _battery(), solver="highs")
+
+    assert (result.daily["degradation_cost_eur"] > 0).all()
+    assert result.summary["degradation_cost_eur"] == pytest.approx(
+        result.daily["degradation_cost_eur"].sum()
+    )
+    assert plain.summary["degradation_cost_eur"] == 0.0
+    assert result.summary["optimized_revenue_eur"] <= plain.summary["optimized_revenue_eur"]

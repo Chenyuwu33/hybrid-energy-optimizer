@@ -64,3 +64,22 @@ def test_battery_config_is_supported_by_from_config() -> None:
         throughput_cost_eur_per_mwh=1.0,
     )
     assert Battery.from_config(config).terminal_soc_mwh is None
+
+
+def test_battery_carries_degradation_cost_separately_from_throughput_cost() -> None:
+    from energy_hub.config import DegradationConfig, load_config
+
+    base = load_config("configs/base.yaml")
+    degradation = DegradationConfig(enabled=True)
+
+    battery = Battery.from_config(base.battery, degradation)
+
+    assert battery.degradation_cost_eur_per_mwh == pytest.approx(5.0)
+    assert battery.cycling_cost_eur_per_mwh == pytest.approx(
+        base.battery.throughput_cost_eur_per_mwh + 5.0
+    )
+    assert Battery.from_config(base.battery).degradation_cost_eur_per_mwh == 0.0
+    assert battery.with_degradation(None).degradation_cost_eur_per_mwh == 0.0
+    assert battery.with_degradation(DegradationConfig(enabled=False)).cycling_cost_eur_per_mwh == (
+        pytest.approx(base.battery.throughput_cost_eur_per_mwh)
+    )

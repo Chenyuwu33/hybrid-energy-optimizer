@@ -244,3 +244,38 @@ def test_kpis_deduct_grid_import_cost_including_fee() -> None:
     assert kpis["optimized_revenue_eur"] == pytest.approx(1000.0 - 150.0)
     # No wind, so both battery-less baselines earn nothing: all value is arbitrage.
     assert kpis["battery_incremental_value_eur"] == pytest.approx(850.0)
+
+
+def test_kpis_report_degradation_cost_and_cycle_life_used() -> None:
+    from dataclasses import replace
+
+    inputs = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+            "wind_mwh": [10.0, 0.0],
+            "price_eur_mwh": [10.0, 100.0],
+        }
+    )
+    dispatch = pd.DataFrame(
+        {
+            "timestamp": inputs["timestamp"],
+            "wind_available_mwh": [10.0, 0.0],
+            "price_eur_mwh": [10.0, 100.0],
+            "wind_to_grid_mwh": [0.0, 0.0],
+            "battery_charge_mwh": [10.0, 0.0],
+            "battery_discharge_mwh": [0.0, 10.0],
+            "grid_export_mwh": [0.0, 10.0],
+            "curtailment_mwh": [0.0, 0.0],
+            "soc_mwh": [10.0, 0.0],
+        }
+    )
+    result = DispatchResult(dispatch=dispatch, objective_eur=900.0, solver_status="optimal")
+    battery = replace(_battery(), degradation_cost_eur_per_mwh=5.0)
+
+    kpis = calculate_kpis(inputs, result, battery, cycle_life_full_cycles=1000.0)
+
+    assert kpis["degradation_cost_eur"] == pytest.approx(20 * 5.0)
+    assert kpis["optimized_revenue_eur"] == pytest.approx(1000.0 - 100.0)
+    # 20 MWh throughput on a 20 MWh battery is 0.5 full cycles of 1000.
+    assert kpis["cycle_life_consumed_pct"] == pytest.approx(0.05)
+    assert "cycle_life_consumed_pct" not in calculate_kpis(inputs, result, battery)

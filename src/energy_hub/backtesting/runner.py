@@ -100,6 +100,7 @@ def run_daily_backtest(
                 "equivalent_full_cycles": throughput / (2.0 * battery.energy_capacity_mwh),
                 "ending_soc_mwh": float(dispatch["soc_mwh"].iloc[-1]),
                 "grid_import_mwh": float(dispatch["grid_import_mwh"].sum()),
+                "degradation_cost_eur": battery.degradation_cost_eur_per_mwh * throughput,
             }
         )
 
@@ -121,5 +122,6 @@ def run_daily_backtest(
         "total_uplift_vs_sell_all_eur": float(daily["total_uplift_vs_sell_all_eur"].sum()),
         "equivalent_full_cycles": float(daily["equivalent_full_cycles"].sum()),
         "grid_import_mwh": float(daily["grid_import_mwh"].sum()),
+        "degradation_cost_eur": float(daily["degradation_cost_eur"].sum()),
     }
     return BacktestResult(daily=daily, summary=summary)

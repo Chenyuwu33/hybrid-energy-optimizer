@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import streamlit as st
+from degradation_controls import degradation_inputs
 from grid_controls import grid_charging_inputs, grid_limit_input
 
 from energy_hub.config import ProjectConfig, resize_battery_config, soc_percent_bounds
@@ -69,6 +70,8 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
 
         with st.expander("Grid charging (arbitrage)"):
             grid_charging = grid_charging_inputs(base, "sample")
+        with st.expander("Battery degradation"):
+            degradation = degradation_inputs(base, "sample")
 
         submitted = st.form_submit_button("Run sample optimization", type="primary")
 
@@ -90,6 +93,7 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
             battery=battery,
             grid_export_limit_mw=grid_limit,
             grid_charging=grid_charging,
+            degradation=degradation,
         )
         result = run_case(config, solver_override=solver)
     except (ValueError, RuntimeError) as exc:
@@ -111,6 +115,12 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
         help="Optimized revenue minus a wind-only baseline that curtails at negative prices.",
     )
     c5.metric("Equivalent cycles", f"{kpis['equivalent_full_cycles']:.2f}")
+    if degradation.enabled:
+        st.caption(
+            f"Battery degradation cost €{kpis['degradation_cost_eur']:,.0f} "
+            f"({kpis['cycle_life_consumed_pct']:.3f}% of cycle life used), already deducted "
+            "from the optimized revenue."
+        )
     if grid_charging.enabled:
         st.caption(
             f"Grid charging: {kpis['total_grid_import_mwh']:,.1f} MWh bought for "

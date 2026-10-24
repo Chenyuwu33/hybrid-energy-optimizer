@@ -49,13 +49,16 @@ def calculate_kpis(
     battery: Battery,
     grid_export_limit_mw: float | None = None,
     grid_import_fee_eur_per_mwh: float = 0.0,
+    cycle_life_full_cycles: float | None = None,
 ) -> dict[str, float | str]:
     """Calculate operational and economic KPIs for one optimized dispatch.
 
     Pass the same ``grid_export_limit_mw`` used for optimization so the baselines face the
     same connection constraint and the battery's value is not overstated. When the battery
     charged from the grid, imports are paid at the market price plus
-    ``grid_import_fee_eur_per_mwh`` and deducted from the optimized revenue.
+    ``grid_import_fee_eur_per_mwh`` and deducted from the optimized revenue. Battery
+    degradation cost (``battery.degradation_cost_eur_per_mwh``) is deducted like the generic
+    throughput cost; pass ``cycle_life_full_cycles`` to also report the share of cycle life used.
     """
     dispatch = result.dispatch
     baseline = calculate_baseline_revenue(inputs, grid_export_limit_mw)
@@ -73,8 +76,12 @@ def calculate_kpis(
     throughput = float(
         dispatch["battery_charge_mwh"].sum() + dispatch["battery_discharge_mwh"].sum()
     )
+    degradation_cost = battery.degradation_cost_eur_per_mwh * throughput
     optimized = (
-        gross_market_revenue - import_cost - battery.throughput_cost_eur_per_mwh * throughput
+        gross_market_revenue
+        - import_cost
+        - battery.throughput_cost_eur_per_mwh * throughput
+        - degradation_cost
     )
     uplift = optimized - baseline
     uplift_pct = 0.0 if abs(baseline) < 1e-12 else uplift / baseline * 100.0
@@ -97,12 +104,15 @@ def calculate_kpis(
         "total_curtailment_mwh": float(dispatch["curtailment_mwh"].sum()),
         "total_grid_import_mwh": float(grid_import.sum()),
         "grid_import_cost_eur": import_cost,
+        "degradation_cost_eur": float(degradation_cost),
         "average_realized_price_eur_per_mwh": float(realized_price),
         "equivalent_full_cycles": float(cycles),
         "min_soc_mwh": float(dispatch["soc_mwh"].min()),
         "max_soc_mwh": float(dispatch["soc_mwh"].max()),
         "solver_status": result.solver_status,
     }
+    if cycle_life_full_cycles is not None:
+        kpis["cycle_life_consumed_pct"] = float(cycles / cycle_life_full_cycles * 100.0)
     if grid_export_limit_mw is not None:
         limit = float(grid_export_limit_mw)
         kpis["grid_export_limit_mw"] = limit

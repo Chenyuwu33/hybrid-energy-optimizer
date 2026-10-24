@@ -76,6 +76,45 @@ class GridChargingConfig:
             raise ValueError("grid_charging.import_fee_eur_per_mwh must be non-negative")
 
 
+@dataclass(frozen=True)
+class DegradationConfig:
+    """Cycle-based battery degradation priced as a cost per MWh of throughput.
+
+    Every full equivalent cycle (charge + discharge of the full capacity) consumes
+    ``1 / cycle_life_full_cycles`` of the cells' life, whose replacement costs
+    ``cell_replacement_cost_eur_per_mwh`` per MWh of capacity. Spreading that over the 2 MWh
+    of throughput per MWh-cycle gives the marginal cost the optimizer weighs against each
+    trade. Charging it per MWh acts as a sinking fund for cell replacement, so investment
+    appraisals must not add a separate replacement capex on top.
+
+    ``calendar_life_years`` is reported against the cycle-implied life: if the battery would
+    outlive its calendar life, time rather than cycling limits it and the per-MWh cost alone
+    understates ageing.
+    """
+
+    enabled: bool = False
+    cell_replacement_cost_eur_per_mwh: float = 75_000.0
+    cycle_life_full_cycles: float = 7_500.0
+    calendar_life_years: float = 20.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("degradation.enabled must be true or false")
+        if not self.cell_replacement_cost_eur_per_mwh >= 0:
+            raise ValueError("degradation.cell_replacement_cost_eur_per_mwh must be non-negative")
+        if not self.cycle_life_full_cycles > 0:
+            raise ValueError("degradation.cycle_life_full_cycles must be positive")
+        if not self.calendar_life_years > 0:
+            raise ValueError("degradation.calendar_life_years must be positive")
+
+    @property
+    def cost_eur_per_mwh_throughput(self) -> float:
+        """Degradation cost per MWh charged or discharged (0 when disabled)."""
+        if not self.enabled:
+            return 0.0
+        return self.cell_replacement_cost_eur_per_mwh / (2.0 * self.cycle_life_full_cycles)
+
+
 def soc_percent_bounds(base: BatteryConfig) -> tuple[float, float]:
     """Return the allowed SOC range in percent implied by a battery's SOC bounds."""
     return (
@@ -143,6 +182,7 @@ class ProjectConfig:
     grid_export_limit_mw: float | None = None
     investment: InvestmentAssumptions = InvestmentAssumptions()
     grid_charging: GridChargingConfig = GridChargingConfig()
+    degradation: DegradationConfig = DegradationConfig()
 
     def __post_init__(self) -> None:
         if self.grid_export_limit_mw is not None and not self.grid_export_limit_mw > 0:
@@ -187,6 +227,12 @@ def load_config(path: str | Path) -> ProjectConfig:
     except TypeError as exc:
         raise ValueError(f"Invalid grid_charging configuration: {exc}") from exc
 
+    degradation_raw = _require_mapping(root.get("degradation") or {}, "degradation")
+    try:
+        degradation = DegradationConfig(**degradation_raw)
+    except TypeError as exc:
+        raise ValueError(f"Invalid degradation configuration: {exc}") from exc
+
     try:
         battery = BatteryConfig(**battery_raw)
         return ProjectConfig(
@@ -197,6 +243,7 @@ def load_config(path: str | Path) -> ProjectConfig:
             grid_export_limit_mw=grid_export_limit_mw,
             investment=investment,
             grid_charging=grid_charging,
+            degradation=degradation,
         )
     except KeyError as exc:
         raise ValueError(f"Missing configuration key: {exc.args[0]}") from exc

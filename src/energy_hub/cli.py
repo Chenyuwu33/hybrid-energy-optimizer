@@ -14,7 +14,7 @@ import requests
 from energy_hub.assets.battery import Battery
 from energy_hub.backtesting.runner import BacktestResult, run_daily_backtest
 from energy_hub.backtesting.sizing import SizingResult, parse_number_list, run_sizing_sweep
-from energy_hub.config import GridChargingConfig, load_config
+from energy_hub.config import DegradationConfig, GridChargingConfig, load_config
 from energy_hub.data.energinet import EnerginetClient
 from energy_hub.data.io import load_hourly_inputs
 from energy_hub.run import run_case
@@ -36,6 +36,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Override the solver specified in the YAML configuration",
     )
     _add_grid_arguments(run_parser)
+    _add_degradation_arguments(run_parser)
 
     backtest_parser = subparsers.add_parser(
         "backtest",
@@ -68,6 +69,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Output directory; defaults to output_dir from the YAML configuration",
     )
     _add_grid_arguments(backtest_parser)
+    _add_degradation_arguments(backtest_parser)
 
     size_parser = subparsers.add_parser(
         "size",
@@ -108,6 +110,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Output directory; defaults to output_dir from the YAML configuration",
     )
     _add_grid_arguments(size_parser)
+    _add_degradation_arguments(size_parser)
     return parser
 
 
@@ -146,6 +149,60 @@ def _add_grid_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         help="Override grid_charging.import_limit_mw (MW at the connection point)",
+    )
+
+
+def _add_degradation_arguments(parser: argparse.ArgumentParser) -> None:
+    toggle = parser.add_mutually_exclusive_group()
+    toggle.add_argument(
+        "--degradation",
+        dest="degradation",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Price battery cycling with the degradation model (overrides degradation.enabled)",
+    )
+    toggle.add_argument(
+        "--no-degradation",
+        dest="degradation",
+        action="store_const",
+        const=False,
+        help="Ignore battery degradation cost (overrides degradation.enabled)",
+    )
+    parser.add_argument(
+        "--cycle-life",
+        type=float,
+        default=None,
+        help="Override degradation.cycle_life_full_cycles (full equivalent cycles)",
+    )
+    parser.add_argument(
+        "--replacement-cost",
+        type=float,
+        default=None,
+        help="Override degradation.cell_replacement_cost_eur_per_mwh (EUR per MWh capacity)",
+    )
+
+
+def _effective_degradation(args: argparse.Namespace, config) -> DegradationConfig:
+    degradation = config.degradation
+    if args.degradation is not None:
+        degradation = replace(degradation, enabled=args.degradation)
+    if args.cycle_life is not None:
+        degradation = replace(degradation, cycle_life_full_cycles=float(args.cycle_life))
+    if args.replacement_cost is not None:
+        degradation = replace(
+            degradation, cell_replacement_cost_eur_per_mwh=float(args.replacement_cost)
+        )
+    return degradation
+
+
+def _print_degradation(degradation: DegradationConfig, label_width: int) -> None:
+    if not degradation.enabled:
+        return
+    label = "Degradation:".ljust(label_width)
+    print(
+        f"{label}on (€{degradation.cost_eur_per_mwh_throughput:.2f}/MWh throughput, "
+        f"cycle life {degradation.cycle_life_full_cycles:,.0f})"
     )
 
 
@@ -210,6 +267,7 @@ def _write_sizing_outputs(output_dir: Path, result: SizingResult) -> None:
         "annualization_factor": result.annualization_factor,
         "grid_export_limit_mw": result.grid_export_limit_mw,
         "grid_charging_enabled": result.grid_charging_enabled,
+        "degradation": None if result.degradation is None else vars(result.degradation),
         "assumptions": vars(result.assumptions),
         "best_size": None if best is None else {
             "power_mw": float(best["power_mw"]),
@@ -256,6 +314,7 @@ def _run_sizing(args: argparse.Namespace) -> int:
     durations = parse_number_list(args.durations, "--durations")
     grid_limit = _effective_grid_limit(args, config)
     grid_charging = _effective_grid_charging(args, config)
+    degradation = _effective_degradation(args, config)
     output_dir = Path(args.output_dir) if args.output_dir else config.output_dir
     inputs, source = _sizing_inputs(args, config)
 
@@ -268,6 +327,7 @@ def _run_sizing(args: argparse.Namespace) -> int:
         solver=args.solver or config.solver,
         grid_export_limit_mw=grid_limit,
         grid_charging=grid_charging,
+        degradation=degradation,
     )
     _write_sizing_outputs(output_dir, result)
 
@@ -279,14 +339,21 @@ def _run_sizing(args: argparse.Namespace) -> int:
     if grid_limit is not None:
         print(f"Grid export limit:  {grid_limit:g} MW")
     _print_grid_charging(grid_charging, 20)
+    _print_degradation(degradation, 20)
     print()
-    print(f"{'Power':>8} {'Hours':>6} {'Annual value':>14} {'Capex':>14} {'NPV':>14} {'IRR':>7}")
+    print(
+        f"{'Power':>8} {'Hours':>6} {'Annual value':>14} {'Capex':>14} {'NPV':>14} "
+        f"{'IRR':>7} {'Cycles/yr':>9} {'Life (yr)':>9}"
+    )
     for row in result.table.itertuples():
         irr_value = _optional_float(row.irr)
         irr = "n/a" if irr_value is None else f"{irr_value:.1%}"
+        life_value = _optional_float(row.cycle_life_years)
+        life = "-" if life_value is None else f"{life_value:.1f}"
         print(
             f"{row.power_mw:>6g}MW {row.duration_h:>5g}h €{row.annual_battery_value_eur:>12,.0f} "
-            f"€{row.capex_eur:>12,.0f} €{row.npv_eur:>12,.0f} {irr:>7}"
+            f"€{row.capex_eur:>12,.0f} €{row.npv_eur:>12,.0f} {irr:>7} "
+            f"{row.annual_equivalent_full_cycles:>9.0f} {life:>9}"
         )
     print()
     best = result.best
@@ -297,6 +364,14 @@ def _run_sizing(args: argparse.Namespace) -> int:
             f"Best NPV: {best['power_mw']:g} MW / {best['duration_h']:g} h "
             f"({best['energy_mwh']:g} MWh), NPV €{best['npv_eur']:,.0f}"
         )
+    if degradation.enabled and best is not None:
+        best_life = _optional_float(best["cycle_life_years"])
+        if best_life is not None and best_life > degradation.calendar_life_years:
+            print(
+                f"Note: at this pace the cells' cycle life lasts {best_life:.0f} years, longer "
+                f"than the {degradation.calendar_life_years:g}-year calendar life, so ageing "
+                "with time rather than cycling would limit the battery."
+            )
     if result.days < 28:
         print(
             "Warning: fewer than 28 days were backtested; "
@@ -312,6 +387,7 @@ def _run_single_case(args: argparse.Namespace) -> int:
         config,
         grid_export_limit_mw=_effective_grid_limit(args, config),
         grid_charging=_effective_grid_charging(args, config),
+        degradation=_effective_degradation(args, config),
     )
     result = run_case(config, solver_override=args.solver)
     _write_outputs(config.output_dir, result.dispatch, result.kpis)
@@ -326,6 +402,9 @@ def _run_single_case(args: argparse.Namespace) -> int:
     _print_grid_charging(config.grid_charging, 20)
     if config.grid_charging.enabled:
         print(f"Grid import:        {result.kpis['total_grid_import_mwh']:,.1f} MWh")
+    _print_degradation(config.degradation, 20)
+    if config.degradation.enabled:
+        print(f"Degradation cost:   €{result.kpis['degradation_cost_eur']:,.2f}")
     print(f"Solver status:      {result.kpis['solver_status']}")
     print(f"Results written to: {config.output_dir}")
     return 0
@@ -341,7 +420,8 @@ def _run_historical_backtest(args: argparse.Namespace) -> int:
         raise ValueError("--start must be before --end")
 
     config = load_config(args.config)
-    battery = Battery.from_config(config.battery)
+    degradation = _effective_degradation(args, config)
+    battery = Battery.from_config(config.battery, degradation)
     solver = args.solver or config.solver
     grid_limit = _effective_grid_limit(args, config)
     grid_charging = _effective_grid_charging(args, config)
@@ -370,6 +450,7 @@ def _run_historical_backtest(args: argparse.Namespace) -> int:
     if grid_limit is not None:
         print(f"Grid export limit:          {grid_limit:g} MW")
     _print_grid_charging(grid_charging, 28)
+    _print_degradation(degradation, 28)
     print(f"Days replayed:              {result.summary['days']}")
     print(
         "Sell-all baseline:          "

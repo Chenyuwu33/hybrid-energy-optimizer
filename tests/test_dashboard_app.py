@@ -69,3 +69,15 @@ def test_sample_tab_grid_charging_toggle_reports_imports() -> None:
     assert not app.exception
     assert not app.error
     assert any("Grid charging:" in c.value for c in app.caption)
+
+
+def test_sample_tab_reports_degradation_cost_by_default() -> None:
+    app_path = Path(__file__).resolve().parents[1] / "dashboard" / "app.py"
+    app = AppTest.from_file(app_path, default_timeout=20).run()
+
+    assert app.checkbox(key="sample_degradation").value is True
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert not app.error
+    assert any("Battery degradation cost" in c.value for c in app.caption)

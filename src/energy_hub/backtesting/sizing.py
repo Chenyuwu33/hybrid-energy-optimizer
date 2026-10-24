@@ -11,6 +11,7 @@ from energy_hub.assets.battery import Battery
 from energy_hub.backtesting.runner import run_daily_backtest
 from energy_hub.config import (
     BatteryConfig,
+    DegradationConfig,
     GridChargingConfig,
     resize_battery_config,
     soc_percent_bounds,
@@ -27,6 +28,8 @@ SIZING_COLUMNS = [
     "period_battery_value_eur",
     "annual_battery_value_eur",
     "annual_equivalent_full_cycles",
+    "annual_degradation_cost_eur",
+    "cycle_life_years",
     "capex_eur",
     "annual_fixed_om_eur",
     "npv_eur",
@@ -45,6 +48,7 @@ class SizingResult:
     assumptions: InvestmentAssumptions
     grid_export_limit_mw: float | None
     grid_charging_enabled: bool = False
+    degradation: DegradationConfig | None = None
 
     @property
     def best(self) -> pd.Series | None:
@@ -83,6 +87,7 @@ def run_sizing_sweep(
     solver: str = "highs",
     grid_export_limit_mw: float | None = None,
     grid_charging: GridChargingConfig | None = None,
+    degradation: DegradationConfig | None = None,
     initial_soc_pct: float | None = None,
     terminal_soc_pct: float | None = None,
     max_cases: int = MAX_SWEEP_CASES,
@@ -94,6 +99,10 @@ def run_sizing_sweep(
     its incremental revenue over the battery-less curtail-negative baseline (which faces the
     same grid limit), scaled from the backtest period to a year. That first-year value feeds a
     discounted cash-flow appraisal per size.
+
+    With ``degradation`` enabled, each candidate pays the per-MWh cycling cost inside the
+    optimizer, so its value is already net of cell wear (a sinking fund for replacement), and
+    ``cycle_life_years`` reports how long its cycle life would last at the backtested pace.
 
     The backtest is a perfect-foresight benchmark, so values are an optimistic upper bound,
     and a short or unrepresentative period scales poorly to a full year.
@@ -137,7 +146,8 @@ def run_sizing_sweep(
                     discharge_power_mw=power,
                     initial_soc_pct=initial,
                     terminal_soc_pct=terminal,
-                )
+                ),
+                degradation,
             )
             backtest = run_daily_backtest(
                 inputs,
@@ -151,6 +161,14 @@ def run_sizing_sweep(
             period_value = float(backtest.summary["battery_incremental_vs_curtail_eur"])
             annual_value = period_value * factor
             appraisal = evaluate_battery_investment(energy, power, annual_value, assumptions)
+            annual_cycles = float(backtest.summary["equivalent_full_cycles"]) * factor
+            degradation_on = degradation is not None and degradation.enabled
+            # NaN (not None) keeps the column numeric when no candidate has a cycle life.
+            cycle_life_years = (
+                degradation.cycle_life_full_cycles / annual_cycles
+                if degradation_on and annual_cycles > 1e-9
+                else float("nan")
+            )
             rows.append(
                 {
                     "power_mw": power,
@@ -158,10 +176,12 @@ def run_sizing_sweep(
                     "energy_mwh": energy,
                     "period_battery_value_eur": period_value,
                     "annual_battery_value_eur": annual_value,
-                    "annual_equivalent_full_cycles": float(
-                        backtest.summary["equivalent_full_cycles"]
+                    "annual_equivalent_full_cycles": annual_cycles,
+                    "annual_degradation_cost_eur": float(
+                        backtest.summary["degradation_cost_eur"]
                     )
                     * factor,
+                    "cycle_life_years": cycle_life_years,
                     "capex_eur": appraisal.capex_eur,
                     "annual_fixed_om_eur": appraisal.annual_fixed_om_eur,
                     "npv_eur": appraisal.npv_eur,
@@ -178,4 +198,5 @@ def run_sizing_sweep(
         assumptions=assumptions,
         grid_export_limit_mw=grid_export_limit_mw,
         grid_charging_enabled=bool(grid_charging and grid_charging.enabled),
+        degradation=degradation if degradation is not None and degradation.enabled else None,
     )

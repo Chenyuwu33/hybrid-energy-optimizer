@@ -11,6 +11,7 @@ The repository is designed as a reusable foundation for energy analytics and opt
 - **v0.2.1:** interactive historical Streamlit dashboard with wind-farm and BESS sizing inputs
 - **v0.3.0:** grid-connection export limit, battery-only value KPI, and a BESS sizing sweep with NPV / IRR / payback appraisal
 - **v0.4.0:** optional grid charging (price arbitrage) with import fee and import limit
+- **v0.5.0:** cycle-based battery degradation cost (on by default) in dispatch, KPIs, backtests and sizing
 
 > **Important:** this is an educational and decision-support prototype. It is not operational, trading, investment, or safety advice for any real asset.
 
@@ -112,6 +113,22 @@ energy-hub run --config configs/base.yaml --solver highs --grid-limit-mw 60
 The limit caps `wind_to_grid + battery_discharge` in every hour. Wind above it must be stored or curtailed. **Both battery-less baselines face the same limit** (they curtail the excess), so `battery_incremental_value_eur` stays a like-for-like measure of what the battery adds. With a limit, `kpis.json` also reports `grid_export_limit_mw`, `grid_limit_binding_hours`, and `wind_above_grid_limit_mwh`. `--grid-limit-mw` works for `energy-hub backtest` as well, and both dashboard tabs have a grid-limit input (0 = unconstrained).
 
 A limit does not automatically make the battery more valuable: if wind already fills the connection in most hours, there is little headroom left to discharge into. The battery earns the most when wind regularly exceeds the limit in some hours and falls below it in others.
+
+#### Battery degradation cost
+
+Every MWh charged or discharged wears the cells. The `degradation:` section (on in `configs/base.yaml`) prices that wear inside the optimizer:
+
+```text
+degradation cost per MWh throughput = cell_replacement_cost_eur_per_mwh / (2 x cycle_life_full_cycles)
+                                    = 75,000 / (2 x 7,500) = 5 EUR/MWh   (default)
+```
+
+A full cycle moves 2 MWh of throughput per MWh of capacity, so each full cycle uses up `1 / cycle_life` of the cells' replacement value. The optimizer only trades when the price spread, after efficiency losses, also covers this cost, so it cycles less than a battery that treats cycling as free. Revenues and battery value are reported **net** of it; `kpis.json` adds `degradation_cost_eur` and `cycle_life_consumed_pct`, backtests add a daily `degradation_cost_eur`, and the sizing sweep adds `annual_degradation_cost_eur` and `cycle_life_years` (how long the cells last at the backtested pace).
+
+- **Defaults are placeholders.** 7,500 full cycles corresponds to about 72 % remaining capacity on Modo Energy's standard LFP degradation curve (about 67 % after 10,000 cycles); €75k/MWh sits above BNEF's 2025 average stationary-storage pack price of $70/kWh to allow for installation and disposal. Use the supplier's warranty and quote.
+- **No double counting.** The per-MWh charge works like a sinking fund for cell replacement, so the NPV must not also include a replacement capex. `annual_revenue_degradation` in `investment:` should then mainly reflect market cannibalisation rather than capacity fade.
+- **Calendar ageing.** If `cycle_life_years` exceeds `calendar_life_years` (default 20), time rather than cycling limits the cells and the per-MWh cost understates ageing; the CLI and dashboard point this out for the best size.
+- Override with `--degradation` / `--no-degradation`, `--cycle-life` and `--replacement-cost` on `run`, `backtest` and `size`; each dashboard tab has a **Battery degradation** section.
 
 #### Optional grid charging (arbitrage)
 
@@ -266,9 +283,9 @@ The daily backtest is a **perfect-information historical benchmark**: each day's
 
 ### Current economic and grid limitations
 
-v0.4.0 still does not model several effects needed for an investment-grade study, including:
+v0.5.0 still does not model several effects needed for an investment-grade study, including:
 
-- battery degradation economics beyond the configurable generic throughput-cost hook,
+- depth-of-discharge-, C-rate- and temperature-dependent degradation (the model prices cycling linearly per MWh),
 - forecast error and rolling-horizon operation,
 - imbalance settlement,
 - intraday/balancing/reserve-market participation,
@@ -282,14 +299,18 @@ Energi Data Service interprets bare API `start`/`end` values in Danish local tim
 
 ## Synthetic reference result
 
-A reference run of the included synthetic case produced approximately:
+A reference run of the included synthetic case (`configs/base.yaml`, degradation on) produced approximately:
 
-| KPI | Value |
-|---|---:|
-| Baseline revenue | €65,977 |
-| Optimized revenue | €80,061 |
-| Revenue uplift | €14,084 |
-| Solver status | optimal |
+| KPI | With degradation (default) | `--no-degradation` |
+|---|---:|---:|
+| Sell-all baseline revenue | €65,977 | €65,977 |
+| Optimized revenue | €77,872 | €80,061 |
+| Revenue uplift | €11,895 | €14,084 |
+| Battery value (vs curtail-negative) | €10,378 | €12,567 |
+| Degradation cost | €2,092 | — |
+| Solver status | optimal | optimal |
+
+Pricing wear removes more than the €2,092 cost itself: the optimizer also drops marginal trades whose spread no longer covers the wear.
 
 These figures are only a reproducibility check for the synthetic sample and are not a commercial-return estimate.
 
@@ -400,20 +421,20 @@ GitHub Actions installs the project on Python 3.11, runs Ruff and Pytest, and ru
 Build:
 
 ```bash
-docker build -t hybrid-energy-optimizer:0.4.0 .
+docker build -t hybrid-energy-optimizer:0.5.0 .
 ```
 
 Run the included synthetic case:
 
 ```bash
-docker run --rm hybrid-energy-optimizer:0.4.0 \
+docker run --rm hybrid-energy-optimizer:0.5.0 \
   energy-hub run --config configs/base.yaml --solver highs
 ```
 
 Run the dashboard in Docker:
 
 ```bash
-docker run --rm -p 8501:8501 hybrid-energy-optimizer:0.4.0 \
+docker run --rm -p 8501:8501 hybrid-energy-optimizer:0.5.0 \
   streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501
 ```
 
@@ -443,10 +464,11 @@ Completed foundation:
 - [x] Optional grid-connection export limit (optimizer, baselines, CLI, dashboard)
 - [x] BESS sizing sweep with NPV / IRR / payback appraisal (CLI and dashboard)
 - [x] Optional grid charging (price arbitrage) with import fee and import limit
+- [x] Cycle-based battery degradation cost in dispatch, KPIs, backtests and sizing
 
 Next priorities:
 
-1. Add cycle-based battery degradation economics
+1. Add depth-of-discharge-dependent (piecewise) degradation
 2. Add hourly historical dispatch export and deeper diagnostic views
 3. Persist normalized market data across sessions (in-session caching is in place)
 4. Add wind- and price-forecast models and quantify forecast economic value

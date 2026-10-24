@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import requests
 import streamlit as st
+from degradation_controls import degradation_inputs
 from grid_controls import grid_charging_inputs, grid_limit_input
 from historical_backtest import CachedEnerginetClient, default_period
 
@@ -24,6 +25,9 @@ _REPRESENTATIVE_DAYS = 28
 def _format_table(table):
     shown = table.copy()
     shown["irr"] = shown["irr"].map(lambda v: "n/a" if v is None or v != v else f"{v:.1%}")
+    shown["cycle_life_years"] = shown["cycle_life_years"].map(
+        lambda v: "-" if v is None or v != v else f"{v:.1f}"
+    )
     shown["simple_payback_years"] = shown["simple_payback_years"].map(
         lambda v: "never" if v is None or v != v else f"{v:.1f}"
     )
@@ -35,6 +39,8 @@ def _format_table(table):
             "period_battery_value_eur": "Period value (€)",
             "annual_battery_value_eur": "Annual value (€)",
             "annual_equivalent_full_cycles": "Cycles / year",
+            "annual_degradation_cost_eur": "Degradation (€/yr)",
+            "cycle_life_years": "Cycle life (years)",
             "capex_eur": "Capex (€)",
             "annual_fixed_om_eur": "Fixed O&M (€/yr)",
             "npv_eur": "NPV (€)",
@@ -121,6 +127,8 @@ def render_bess_sizing(base: ProjectConfig) -> None:
 
         with st.expander("Grid charging (arbitrage)"):
             grid_charging = grid_charging_inputs(base, "sizing")
+        with st.expander("Battery degradation"):
+            degradation = degradation_inputs(base, "sizing")
 
         submitted = st.form_submit_button("Run sizing sweep", type="primary")
 
@@ -160,6 +168,7 @@ def render_bess_sizing(base: ProjectConfig) -> None:
                 solver=solver,
                 grid_export_limit_mw=grid_limit,
                 grid_charging=grid_charging,
+                degradation=degradation,
             )
     except (ValueError, RuntimeError, OSError, requests.RequestException) as exc:
         st.error(str(exc))
@@ -178,6 +187,14 @@ def render_bess_sizing(base: ProjectConfig) -> None:
             f"({best['energy_mwh']:g} MWh) — NPV €{best['npv_eur']:,.0f}"
             + ("" if irr is None or irr != irr else f", IRR {irr:.1%}")
         )
+    if best is not None and degradation.enabled:
+        life = best["cycle_life_years"]
+        if life == life and life is not None and life > degradation.calendar_life_years:
+            st.caption(
+                f"At this pace the cells' cycle life would last {life:.0f} years, longer than "
+                f"the {degradation.calendar_life_years:g}-year calendar life: ageing with time, "
+                "not cycling, would limit this battery."
+            )
     if result.days < _REPRESENTATIVE_DAYS:
         st.caption(
             f"Only {result.days} day(s) were backtested and scaled "

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from energy_hub.config import BatteryConfig
+from energy_hub.config import BatteryConfig, DegradationConfig
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class Battery:
     initial_soc_mwh: float
     terminal_soc_mwh: float | None
     throughput_cost_eur_per_mwh: float
+    degradation_cost_eur_per_mwh: float = 0.0
 
     def __post_init__(self) -> None:
         if self.energy_capacity_mwh <= 0:
@@ -45,10 +46,25 @@ class Battery:
             raise ValueError("terminal_soc_mwh must be within SOC bounds")
         if self.throughput_cost_eur_per_mwh < 0:
             raise ValueError("throughput_cost_eur_per_mwh must be non-negative")
+        if self.degradation_cost_eur_per_mwh < 0:
+            raise ValueError("degradation_cost_eur_per_mwh must be non-negative")
+
+    @property
+    def cycling_cost_eur_per_mwh(self) -> float:
+        """Total cost per MWh charged or discharged: generic throughput plus degradation."""
+        return self.throughput_cost_eur_per_mwh + self.degradation_cost_eur_per_mwh
+
+    def with_degradation(self, degradation: DegradationConfig | None) -> Battery:
+        """Return a copy priced with ``degradation`` (no degradation cost if None/disabled)."""
+        cost = 0.0 if degradation is None else degradation.cost_eur_per_mwh_throughput
+        return replace(self, degradation_cost_eur_per_mwh=cost)
 
     @classmethod
-    def from_config(cls, config: BatteryConfig) -> Battery:
+    def from_config(
+        cls, config: BatteryConfig, degradation: DegradationConfig | None = None
+    ) -> Battery:
         """Create an immutable asset model from validated project configuration."""
+        cost = 0.0 if degradation is None else degradation.cost_eur_per_mwh_throughput
         return cls(
             energy_capacity_mwh=config.energy_capacity_mwh,
             charge_power_mw=config.charge_power_mw,
@@ -60,4 +76,5 @@ class Battery:
             initial_soc_mwh=config.initial_soc_mwh,
             terminal_soc_mwh=config.terminal_soc_mwh,
             throughput_cost_eur_per_mwh=config.throughput_cost_eur_per_mwh,
+            degradation_cost_eur_per_mwh=cost,
         )

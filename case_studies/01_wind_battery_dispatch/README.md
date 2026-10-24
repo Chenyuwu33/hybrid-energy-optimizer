@@ -47,7 +47,7 @@ The input price/wind data are synthetic and were created to exercise negative-, 
 
 ## Reference KPIs
 
-A reference execution produced approximately:
+A reference execution with `--no-degradation` (the v0.1 assumption of free cycling) produced approximately:
 
 ```text
 Baseline revenue   €65,977
@@ -56,6 +56,8 @@ Revenue uplift     €14,084
 Battery value      €12,567
 Solver status      optimal
 ```
+
+With the default degradation cost (€5/MWh throughput) the battery value falls to about €10,378 after €2,092 of wear.
 
 The purpose of these numbers is to verify model behavior and reproducibility, not to estimate commercial BESS returns.
 The sell-all baseline exports all wind, so the revenue uplift includes avoided negative-price export through curtailment in addition to storage shifting. `kpis.json` therefore also reports `baseline_curtail_negative_revenue_eur` (a wind-only asset that curtails at negative prices) and `battery_incremental_value_eur` (optimized revenue minus that baseline), which isolates the value created by the battery itself. In this case about €1,500 of the €14,084 uplift comes from curtailment alone.
@@ -66,7 +68,7 @@ From the repository root:
 
 ```bash
 python -m pip install -e ".[dev]"
-energy-hub run --config configs/base.yaml --solver highs
+energy-hub run --config configs/base.yaml --solver highs --no-degradation
 ```
 
 Inspect:
