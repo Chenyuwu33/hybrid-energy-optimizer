@@ -9,6 +9,7 @@ The repository is designed as a reusable foundation for energy analytics and opt
 - **v0.1:** synthetic 24-hour wind + BESS dispatch optimization
 - **v0.2:** historical DK1 data ingestion from Energinet and daily backtesting
 - **v0.2.1:** interactive historical Streamlit dashboard with wind-farm and BESS sizing inputs
+- **v0.3.0:** grid-connection export limit, battery-only value KPI, and a BESS sizing sweep with NPV / IRR / payback appraisal
 
 > **Important:** this is an educational and decision-support prototype. It is not operational, trading, investment, or safety advice for any real asset.
 
@@ -248,7 +249,7 @@ The daily backtest is a **perfect-information historical benchmark**: each day's
 
 ### Current economic and grid limitations
 
-v0.2.1 still does not model several effects needed for an investment-grade study, including:
+v0.3.0 still does not model several effects needed for an investment-grade study, including:
 
 - battery degradation economics beyond the configurable generic throughput-cost hook,
 - forecast error and rolling-horizon operation,
@@ -375,20 +376,20 @@ GitHub Actions installs the project on Python 3.11, runs Ruff and Pytest, and ru
 Build:
 
 ```bash
-docker build -t hybrid-energy-optimizer:0.2.1 .
+docker build -t hybrid-energy-optimizer:0.3.0 .
 ```
 
 Run the included synthetic case:
 
 ```bash
-docker run --rm hybrid-energy-optimizer:0.2.1 \
+docker run --rm hybrid-energy-optimizer:0.3.0 \
   energy-hub run --config configs/base.yaml --solver highs
 ```
 
 Run the dashboard in Docker:
 
 ```bash
-docker run --rm -p 8501:8501 hybrid-energy-optimizer:0.2.1 \
+docker run --rm -p 8501:8501 hybrid-energy-optimizer:0.3.0 \
   streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501
 ```
 
