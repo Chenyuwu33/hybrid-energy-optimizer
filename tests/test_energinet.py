@@ -156,3 +156,39 @@ def test_fetch_hourly_inputs_pads_local_api_range_and_trims_to_requested_utc_day
     assert len(inputs) == 24
     assert inputs["timestamp"].iloc[0] == pd.Timestamp("2026-01-01T00:00:00")
     assert inputs["timestamp"].iloc[-1] == pd.Timestamp("2026-01-01T23:00:00")
+
+
+def test_hours_with_all_wind_columns_blank_are_missing_not_zero() -> None:
+    records = [
+        {
+            "HourUTC": "2026-01-02T00:00:00",
+            "PriceArea": "DK1",
+            "OffshoreWindGe100MW_MWh": 100.0,
+            "OffshoreWindLt100MW_MWh": None,
+            "OnshoreWindGe50kW_MWh": 200.0,
+            "OnshoreWindLt50kW_MWh": None,
+        },
+        {
+            "HourUTC": "2026-01-02T01:00:00",
+            "PriceArea": "DK1",
+            "OffshoreWindGe100MW_MWh": None,
+            "OffshoreWindLt100MW_MWh": None,
+            "OnshoreWindGe50kW_MWh": None,
+            "OnshoreWindLt50kW_MWh": None,
+        },
+    ]
+
+    wind = normalize_wind_records(records)
+
+    # Partially blank hour: blank sub-categories count as zero.
+    assert wind.loc[0, "dk1_wind_mwh"] == pytest.approx(300.0)
+    assert wind.loc[0, "dk1_onshore_wind_mwh"] == pytest.approx(200.0)
+    # Fully blank hour: missing, and dropped when building optimizer inputs.
+    assert pd.isna(wind.loc[1, "dk1_wind_mwh"])
+    assert pd.isna(wind.loc[1, "dk1_onshore_wind_mwh"])
+
+    prices = pd.DataFrame(
+        {"timestamp": wind["timestamp"], "price_eur_mwh": [40.0, 50.0]}
+    )
+    inputs = build_hourly_inputs(prices, wind, wind_share=0.1)
+    assert inputs["timestamp"].tolist() == [wind.loc[0, "timestamp"]]

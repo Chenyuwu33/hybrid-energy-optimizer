@@ -98,6 +98,7 @@ def _run_single_case(args: argparse.Namespace) -> int:
     print(f"Baseline revenue:  €{result.kpis['baseline_revenue_eur']:,.2f}")
     print(f"Optimized revenue: €{result.kpis['optimized_revenue_eur']:,.2f}")
     print(f"Revenue uplift:     €{result.kpis['revenue_uplift_eur']:,.2f}")
+    print(f"Battery value:      €{result.kpis['battery_incremental_value_eur']:,.2f}")
     print(f"Solver status:      {result.kpis['solver_status']}")
     print(f"Results written to: {config.output_dir}")
     return 0

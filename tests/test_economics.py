@@ -107,3 +107,37 @@ def test_zero_wind_kpis_are_finite_and_defined() -> None:
     assert kpis["equivalent_full_cycles"] == 0.0
     assert kpis["average_realized_price_eur_per_mwh"] == 0.0
     assert all(math.isfinite(value) for value in kpis.values() if isinstance(value, float))
+
+
+def test_kpis_separate_battery_value_from_negative_price_curtailment() -> None:
+    from energy_hub.economics.metrics import calculate_curtail_negative_revenue
+
+    inputs = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+            "wind_mwh": [10.0, 10.0],
+            "price_eur_mwh": [-20.0, 50.0],
+        }
+    )
+    # No battery activity: optimal play is to curtail the negative-price hour.
+    dispatch = pd.DataFrame(
+        {
+            "timestamp": inputs["timestamp"],
+            "wind_available_mwh": [10.0, 10.0],
+            "price_eur_mwh": [-20.0, 50.0],
+            "wind_to_grid_mwh": [0.0, 10.0],
+            "battery_charge_mwh": [0.0, 0.0],
+            "battery_discharge_mwh": [0.0, 0.0],
+            "grid_export_mwh": [0.0, 10.0],
+            "curtailment_mwh": [10.0, 0.0],
+            "soc_mwh": [0.0, 0.0],
+        }
+    )
+    result = DispatchResult(dispatch=dispatch, objective_eur=500.0, solver_status="optimal")
+
+    kpis = calculate_kpis(inputs, result, _battery())
+
+    assert calculate_curtail_negative_revenue(inputs) == pytest.approx(500.0)
+    assert kpis["revenue_uplift_eur"] == pytest.approx(200.0)
+    assert kpis["baseline_curtail_negative_revenue_eur"] == pytest.approx(500.0)
+    assert kpis["battery_incremental_value_eur"] == pytest.approx(0.0)

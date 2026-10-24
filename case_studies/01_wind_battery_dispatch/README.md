@@ -53,11 +53,12 @@ A reference execution produced approximately:
 Baseline revenue   €65,977
 Optimized revenue  €80,061
 Revenue uplift     €14,084
+Battery value      €12,567
 Solver status      optimal
 ```
 
 The purpose of these numbers is to verify model behavior and reproducibility, not to estimate commercial BESS returns.
-The baseline is intentionally simple and exports all wind, so the uplift can include avoided negative-price export through curtailment in addition to storage shifting. A later commercial case study should compare against a curtailment-aware no-storage baseline when estimating battery-only incremental value.
+The sell-all baseline exports all wind, so the revenue uplift includes avoided negative-price export through curtailment in addition to storage shifting. `kpis.json` therefore also reports `baseline_curtail_negative_revenue_eur` (a wind-only asset that curtails at negative prices) and `battery_incremental_value_eur` (optimized revenue minus that baseline), which isolates the value created by the battery itself. In this case about €1,500 of the €14,084 uplift comes from curtailment alone.
 
 ## Reproduce
 

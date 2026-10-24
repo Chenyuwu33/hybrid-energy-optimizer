@@ -10,8 +10,16 @@ import pandas as pd
 
 from energy_hub.assets.battery import Battery
 from energy_hub.backtesting.runner import BacktestResult, run_daily_backtest
-from energy_hub.config import BatteryConfig
+from energy_hub.config import BatteryConfig, resize_battery_config, soc_percent_bounds
 from energy_hub.data.energinet import EnerginetClient
+
+__all__ = [
+    "HistoricalBacktestBundle",
+    "HistoricalBacktestRequest",
+    "build_battery_from_request",
+    "run_historical_backtest",
+    "soc_percent_bounds",
+]
 
 
 class HistoricalDataClient(Protocol):
@@ -77,21 +85,15 @@ def build_battery_from_request(
     request: HistoricalBacktestRequest,
 ) -> Battery:
     """Build a BESS scenario while preserving base efficiency and SOC-bound fractions."""
-    min_fraction = base.min_soc_mwh / base.energy_capacity_mwh
-    max_fraction = base.max_soc_mwh / base.energy_capacity_mwh
-    energy = float(request.battery_energy_mwh)
-
-    return Battery(
-        energy_capacity_mwh=energy,
-        charge_power_mw=float(request.charge_power_mw),
-        discharge_power_mw=float(request.discharge_power_mw),
-        charge_efficiency=base.charge_efficiency,
-        discharge_efficiency=base.discharge_efficiency,
-        min_soc_mwh=min_fraction * energy,
-        max_soc_mwh=max_fraction * energy,
-        initial_soc_mwh=request.initial_soc_pct / 100.0 * energy,
-        terminal_soc_mwh=request.terminal_soc_pct / 100.0 * energy,
-        throughput_cost_eur_per_mwh=base.throughput_cost_eur_per_mwh,
+    return Battery.from_config(
+        resize_battery_config(
+            base,
+            energy_capacity_mwh=request.battery_energy_mwh,
+            charge_power_mw=request.charge_power_mw,
+            discharge_power_mw=request.discharge_power_mw,
+            initial_soc_pct=request.initial_soc_pct,
+            terminal_soc_pct=request.terminal_soc_pct,
+        )
     )
 
 
