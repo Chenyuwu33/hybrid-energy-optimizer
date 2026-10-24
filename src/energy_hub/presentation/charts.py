@@ -161,3 +161,52 @@ def daily_cycles_figure(daily: pd.DataFrame) -> go.Figure:
         yaxis_title="Equivalent full cycles",
     )
     return figure
+
+
+def sizing_npv_heatmap(table: pd.DataFrame) -> go.Figure:
+    """NPV for every power x duration option; positive values are value-creating sizes."""
+    pivot = table.pivot(index="power_mw", columns="duration_h", values="npv_eur").sort_index()
+    z = pivot.to_numpy() / 1e6
+    limit = float(abs(z).max()) if z.size else 1.0
+    figure = go.Figure(
+        go.Heatmap(
+            z=z,
+            x=[f"{value:g} h" for value in pivot.columns],
+            y=[f"{value:g} MW" for value in pivot.index],
+            colorscale="RdBu",
+            zmid=0.0,
+            zmin=-limit,
+            zmax=limit,
+            text=[[f"€{value:,.1f}M" for value in row] for row in z],
+            texttemplate="%{text}",
+            colorbar={"title": "NPV (€M)"},
+            hovertemplate="%{y}, %{x}<br>NPV %{text}<extra></extra>",
+        )
+    )
+    figure.update_layout(
+        title="NPV by battery power and duration",
+        xaxis_title="Duration",
+        yaxis_title="Power",
+    )
+    return figure
+
+
+def sizing_value_capex_figure(table: pd.DataFrame) -> go.Figure:
+    """Annual battery value against energy capacity, one line per power rating."""
+    figure = go.Figure()
+    for power, group in table.sort_values("energy_mwh").groupby("power_mw", sort=True):
+        figure.add_trace(
+            go.Scatter(
+                x=group["energy_mwh"],
+                y=group["annual_battery_value_eur"],
+                mode="lines+markers",
+                name=f"{power:g} MW value",
+            )
+        )
+    figure.update_layout(
+        title="Annual battery value by energy capacity",
+        xaxis_title="Battery energy (MWh)",
+        yaxis_title="EUR per year",
+        legend={"orientation": "h"},
+    )
+    return figure

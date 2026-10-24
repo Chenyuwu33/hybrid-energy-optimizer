@@ -143,13 +143,32 @@ The summary separates three strategies:
 
 `battery_incremental_vs_curtail_eur` isolates modeled battery value from the simpler decision to avoid negative-price export.
 
-### 4. Launch the v0.2.1 dashboard
+### 4. Size the battery: power x duration sweep with NPV
+
+```bash
+energy-hub size --config configs/base.yaml --powers 10,25,50 --durations 1,2,4 --grid-limit-mw 60
+```
+
+Every power x duration combination is backtested on the same hourly data (the configured CSV by default, or historical DK1 data with `--start/--end/--wind-share`). For each size:
+
+- **Battery value** = optimized revenue minus the battery-less curtail-negative baseline (both under the same grid limit), scaled from the backtest period to one year.
+- **Capex** = `energy_capex_eur_per_mwh x MWh + power_capex_eur_per_mw x MW`, so longer durations trade cheap energy against expensive power/connection cost.
+- **Cash flows**: year-0 capex, then yearly value declining by `annual_revenue_degradation`, minus fixed O&M as a share of capex, over `lifetime_years`.
+- **NPV** at `discount_rate`, **IRR**, and **simple payback**.
+
+Outputs `sizing.csv` and `sizing_summary.json` (including the highest-NPV size, or `null` when no size has a positive NPV). The dashboard's **BESS Sizing** tab runs the same sweep on historical DK1 data or the sample, with an NPV heatmap, a value-by-capacity chart, and a CSV download.
+
+Investment assumptions live in the `investment:` section of the YAML configuration. The defaults (€100k/MWh energy, €250k/MW power, 2 % O&M, 15 years, 8 % discount rate, 2 %/yr value degradation) are placeholders within published 2025–2026 ranges: BNEF's 2025 survey put average turnkey system prices at about $177/kWh in Europe (global 2-hour $124/kWh, 4-hour $110/kWh), while Modo Energy's September 2026 global medians, which include grid connection, were about $325k/MWh for 2-hour and $201k/MWh for 4-hour projects. Grid-connection cost varies most between sites, so replace these with project quotes.
+
+Read the results with care: the backtest has perfect foresight, so values are an upper bound; the battery charges from wind only (no grid arbitrage or ancillary-service revenue, which usually dominate standalone BESS business cases); and a short backtest period is scaled to a full year (the CLI and dashboard warn below 28 days).
+
+### 5. Launch the dashboard
 
 ```bash
 streamlit run dashboard/app.py
 ```
 
-The dashboard contains two tabs:
+The dashboard contains three tabs: Sample Dispatch, Historical DK1 Backtest (below), and BESS Sizing (see section 4).
 
 #### Sample Dispatch
 
@@ -397,10 +416,11 @@ Completed foundation:
 - [x] Historical daily backtesting with multiple baselines
 - [x] Interactive historical DK1 dashboard with capacity-based onshore profile scaling
 - [x] Optional grid-connection export limit (optimizer, baselines, CLI, dashboard)
+- [x] BESS sizing sweep with NPV / IRR / payback appraisal (CLI and dashboard)
 
 Next priorities:
 
-1. Add battery degradation economics and BESS sizing sensitivity
+1. Add cycle-based battery degradation economics
 2. Add hourly historical dispatch export and deeper diagnostic views
 3. Persist normalized market data across sessions (in-session caching is in place)
 4. Add wind- and price-forecast models and quantify forecast economic value

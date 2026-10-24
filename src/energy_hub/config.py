@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from energy_hub.economics.investment import InvestmentAssumptions
+
 
 @dataclass(frozen=True)
 class BatteryConfig:
@@ -116,6 +118,7 @@ class ProjectConfig:
     solver: str
     battery: BatteryConfig
     grid_export_limit_mw: float | None = None
+    investment: InvestmentAssumptions = InvestmentAssumptions()
 
     def __post_init__(self) -> None:
         if self.grid_export_limit_mw is not None and not self.grid_export_limit_mw > 0:
@@ -147,6 +150,13 @@ def load_config(path: str | Path) -> ProjectConfig:
     except (TypeError, ValueError) as exc:
         raise ValueError("grid_export_limit_mw must be a number or null") from exc
 
+    investment_raw = root.get("investment") or {}
+    investment_raw = _require_mapping(investment_raw, "investment")
+    try:
+        investment = InvestmentAssumptions(**investment_raw)
+    except TypeError as exc:
+        raise ValueError(f"Invalid investment configuration: {exc}") from exc
+
     try:
         battery = BatteryConfig(**battery_raw)
         return ProjectConfig(
@@ -155,6 +165,7 @@ def load_config(path: str | Path) -> ProjectConfig:
             solver=str(root.get("solver", "highs")),
             battery=battery,
             grid_export_limit_mw=grid_export_limit_mw,
+            investment=investment,
         )
     except KeyError as exc:
         raise ValueError(f"Missing configuration key: {exc.args[0]}") from exc

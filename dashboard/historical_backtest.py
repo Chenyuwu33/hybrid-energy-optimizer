@@ -45,7 +45,7 @@ def _fetch_inputs_cached(
     )
 
 
-class _CachedEnerginetClient:
+class CachedEnerginetClient:
     """HistoricalDataClient backed by Streamlit's data cache."""
 
     def fetch_hourly_inputs_for_capacity(
@@ -54,7 +54,7 @@ class _CachedEnerginetClient:
         return _fetch_inputs_cached(start, end, price_area, float(wind_capacity_mw)).copy()
 
 
-def _default_period(today: date | None = None) -> tuple[date, date]:
+def default_period(today: date | None = None) -> tuple[date, date]:
     end = (today or date.today()) - timedelta(days=_DEFAULT_LAG_DAYS)
     return end - timedelta(days=_DEFAULT_WINDOW_DAYS), end
 
@@ -82,7 +82,7 @@ def render_historical_backtest(base: ProjectConfig) -> None:
         d1, d2, d3 = st.columns(3)
         with d1:
             area = st.selectbox("Market area", ["DK1"], index=0)
-            default_start, default_end = _default_period()
+            default_start, default_end = default_period()
             start = st.date_input("Start date", value=default_start)
             end = st.date_input("End date (exclusive)", value=default_end)
         with d2:
@@ -151,7 +151,7 @@ def render_historical_backtest(base: ProjectConfig) -> None:
             grid_export_limit_mw=float(grid_limit_input) if grid_limit_input > 0 else None,
         )
         bundle = run_historical_backtest(
-            request, base.battery, client=_CachedEnerginetClient()
+            request, base.battery, client=CachedEnerginetClient()
         )
     except (ValueError, RuntimeError, OSError, requests.RequestException) as exc:
         st.error(str(exc))

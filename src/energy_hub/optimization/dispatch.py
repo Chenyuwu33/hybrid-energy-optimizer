@@ -12,6 +12,12 @@ from energy_hub.optimization.results import DispatchResult
 if TYPE_CHECKING:
     from energy_hub.assets.battery import Battery
 
+# Tie-breaking cost (EUR/MWh) on battery throughput used only inside the solver. With lossless
+# or zero-cost storage, charging and discharging in the same hour can be exactly as profitable
+# as not cycling at all, which inflates reported throughput and cycle counts. A penalty this
+# small never trades away real revenue; the reported objective is recomputed without it.
+_THROUGHPUT_TIE_BREAK_EUR_PER_MWH = 1e-4
+
 _COLUMNS = [
     "timestamp",
     "wind_available_mwh",
@@ -96,8 +102,9 @@ def _solve_with_scipy_highs(
 
     objective = np.zeros(size, dtype=float)
     objective[wg] = -price
-    objective[charge] = battery.throughput_cost_eur_per_mwh
-    objective[discharge] = -price + battery.throughput_cost_eur_per_mwh
+    cycling_cost = battery.throughput_cost_eur_per_mwh + _THROUGHPUT_TIE_BREAK_EUR_PER_MWH
+    objective[charge] = cycling_cost
+    objective[discharge] = -price + cycling_cost
 
     a_eq: list[np.ndarray] = []
     b_eq: list[float] = []
@@ -177,7 +184,7 @@ def _solve_with_scipy_highs(
     )
     return DispatchResult(
         dispatch=dispatch,
-        objective_eur=float(-solved.fun),
+        objective_eur=_realized_objective(price, grid_export, charging, discharging, battery),
         solver_status="optimal",
     )
 
@@ -247,7 +254,7 @@ def _solve_with_pyomo(
     model.objective = pyo.Objective(
         expr=sum(
             price[t] * (model.wind_to_grid[t] + model.discharge[t])
-            - battery.throughput_cost_eur_per_mwh
+            - (battery.throughput_cost_eur_per_mwh + _THROUGHPUT_TIE_BREAK_EUR_PER_MWH)
             * (model.charge[t] + model.discharge[t])
             for t in range(n)
         ),
@@ -285,9 +292,23 @@ def _solve_with_pyomo(
     )
     return DispatchResult(
         dispatch=dispatch,
-        objective_eur=float(pyo.value(model.objective)),
+        objective_eur=_realized_objective(
+            price, wind_to_grid + discharging, charging, discharging, battery
+        ),
         solver_status=("optimal" if termination == TerminationCondition.optimal else "feasible"),
     )
+
+
+def _realized_objective(
+    price: np.ndarray,
+    grid_export: np.ndarray,
+    charging: np.ndarray,
+    discharging: np.ndarray,
+    battery: Battery,
+) -> float:
+    """Market revenue minus throughput cost for the chosen dispatch (no tie-break term)."""
+    throughput = float(charging.sum() + discharging.sum())
+    return float(np.dot(price, grid_export) - battery.throughput_cost_eur_per_mwh * throughput)
 
 
 def _clean(values: object) -> np.ndarray:

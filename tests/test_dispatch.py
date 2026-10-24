@@ -137,3 +137,18 @@ def test_grid_export_limit_also_caps_battery_discharge() -> None:
 def test_invalid_grid_export_limit_raises_value_error(limit: float) -> None:
     with pytest.raises(ValueError, match="grid_export_limit_mw"):
         optimize_dispatch(_inputs([10.0]), _battery(), grid_export_limit_mw=limit)
+
+
+def test_lossless_storage_does_not_charge_and_discharge_in_the_same_hour() -> None:
+    # Wind above a grid limit with free, lossless storage: cycling within an hour is exactly
+    # as profitable as not cycling, so only the solver's tie-break keeps throughput honest.
+    inputs = _inputs([10.0, 10.0, 100.0, 100.0], wind=[30.0, 30.0, 0.0, 0.0])
+
+    result = optimize_dispatch(inputs, _battery(), solver="highs", grid_export_limit_mw=20.0)
+
+    dispatch = result.dispatch
+    both = (dispatch["battery_charge_mwh"] > 1e-7) & (dispatch["battery_discharge_mwh"] > 1e-7)
+    assert not both.any()
+    assert dispatch["battery_charge_mwh"].sum() == pytest.approx(20.0)
+    # The reported objective is pure market revenue; the tie-break cost is not included.
+    assert result.objective_eur == pytest.approx(2 * 20 * 10.0 + 2 * 10 * 100.0, abs=1e-9)

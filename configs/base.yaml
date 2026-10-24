@@ -16,3 +16,14 @@ battery:
   initial_soc_mwh: 50.0
   terminal_soc_mwh: 50.0
   throughput_cost_eur_per_mwh: 0.0
+
+# Investment assumptions for `energy-hub size` and the dashboard sizing tab.
+# Placeholders within the 2025-2026 published range for European utility-scale BESS;
+# replace with project quotes. Capex = energy part (per MWh) + power part (per MW).
+investment:
+  energy_capex_eur_per_mwh: 100000.0
+  power_capex_eur_per_mw: 250000.0
+  fixed_om_pct_of_capex: 0.02
+  lifetime_years: 15
+  discount_rate: 0.08
+  annual_revenue_degradation: 0.02

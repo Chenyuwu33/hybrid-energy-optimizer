@@ -100,3 +100,26 @@ def test_grid_export_limit_is_loaded_and_validated(tmp_path: Path) -> None:
         )
         with pytest.raises(ValueError, match="grid_export_limit_mw"):
             load_config(invalid)
+
+
+def test_investment_assumptions_load_from_yaml_with_defaults(tmp_path: Path) -> None:
+    from energy_hub.economics.investment import InvestmentAssumptions
+
+    base = load_config("configs/base.yaml")
+    assert base.investment.energy_capex_eur_per_mwh == pytest.approx(100_000.0)
+    assert base.investment.lifetime_years == 15
+
+    text = Path("configs/base.yaml").read_text(encoding="utf-8")
+    no_section = tmp_path / "no_investment.yaml"
+    no_section.write_text(text.split("# Investment assumptions")[0], encoding="utf-8")
+    assert load_config(no_section).investment == InvestmentAssumptions()
+
+    bad = tmp_path / "bad_investment.yaml"
+    bad.write_text(text.replace("discount_rate: 0.08", "discount_rate: 3"), encoding="utf-8")
+    with pytest.raises(ValueError, match="discount_rate"):
+        load_config(bad)
+
+    unknown = tmp_path / "unknown_investment.yaml"
+    unknown.write_text(text + "  capex_typo: 1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid investment configuration"):
+        load_config(unknown)

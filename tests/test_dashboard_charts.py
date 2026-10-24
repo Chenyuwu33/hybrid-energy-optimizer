@@ -95,3 +95,23 @@ def test_dispatch_and_wind_charts_draw_grid_limit_only_when_set() -> None:
     assert len(historical_wind_price_figure(inputs).layout.shapes) == 0
     limited_wind = historical_wind_price_figure(inputs, grid_export_limit_mw=55.0)
     assert [shape.y0 for shape in limited_wind.layout.shapes] == [55.0]
+
+
+def test_sizing_charts_build_from_sweep_table() -> None:
+    from energy_hub.presentation.charts import sizing_npv_heatmap, sizing_value_capex_figure
+
+    table = pd.DataFrame(
+        {
+            "power_mw": [10.0, 10.0, 25.0, 25.0],
+            "duration_h": [1.0, 2.0, 1.0, 2.0],
+            "energy_mwh": [10.0, 20.0, 25.0, 50.0],
+            "annual_battery_value_eur": [1e5, 2e5, 2e5, 3e5],
+            "npv_eur": [-1e6, 5e5, -2e6, 1e6],
+        }
+    )
+
+    heatmap = sizing_npv_heatmap(table)
+    assert heatmap.data[0].z.shape == (2, 2)
+    assert list(heatmap.data[0].y) == ["10 MW", "25 MW"]
+    assert heatmap.data[0].zmid == 0.0
+    assert len(sizing_value_capex_figure(table).data) == 2

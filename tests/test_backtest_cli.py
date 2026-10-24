@@ -135,3 +135,34 @@ def test_backtest_command_applies_grid_limit_to_baselines(
         open_summary["baseline_sell_all_revenue_eur"] * 30.0 / 50.0
     )
     assert limited["optimized_revenue_eur"] >= limited["baseline_curtail_negative_revenue_eur"]
+
+
+def test_size_command_uses_historical_data_when_requested(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    fake = FakeEnerginetClient()
+    monkeypatch.setattr(cli, "EnerginetClient", lambda: fake, raising=False)
+
+    exit_code = cli.main(
+        [
+            "size",
+            "--config",
+            "configs/base.yaml",
+            "--powers",
+            "10",
+            "--durations",
+            "1,2",
+            "--start",
+            "2026-01-01",
+            "--end",
+            "2026-01-03",
+            "--wind-share",
+            "0.05",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert fake.calls == [("2026-01-01", "2026-01-03", "DK1", 0.05)]
+    assert "Energinet DK1 2026-01-01 to 2026-01-03 (2 day(s)" in capsys.readouterr().out
