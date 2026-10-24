@@ -51,6 +51,64 @@ class BatteryConfig:
             raise ValueError("throughput_cost_eur_per_mwh must be non-negative")
 
 
+def soc_percent_bounds(base: BatteryConfig) -> tuple[float, float]:
+    """Return the allowed SOC range in percent implied by a battery's SOC bounds."""
+    return (
+        base.min_soc_mwh / base.energy_capacity_mwh * 100.0,
+        base.max_soc_mwh / base.energy_capacity_mwh * 100.0,
+    )
+
+
+def resize_battery_config(
+    base: BatteryConfig,
+    *,
+    energy_capacity_mwh: float,
+    charge_power_mw: float,
+    discharge_power_mw: float,
+    initial_soc_pct: float,
+    terminal_soc_pct: float,
+) -> BatteryConfig:
+    """Resize a battery while preserving the base efficiencies, cost and SOC-bound fractions.
+
+    Initial and terminal SOC are given as percentages of the new energy capacity and must lie
+    inside the base battery's operating SOC range, so that resizing never produces an
+    infeasible SOC configuration.
+    """
+    min_pct, max_pct = soc_percent_bounds(base)
+    for name, value in (
+        ("Initial SOC", initial_soc_pct),
+        ("Terminal SOC", terminal_soc_pct),
+    ):
+        if not min_pct - 1e-9 <= value <= max_pct + 1e-9:
+            raise ValueError(
+                f"{name} must be between {min_pct:g}% and {max_pct:g}% "
+                "(the battery's configured operating SOC range)"
+            )
+
+    energy = float(energy_capacity_mwh)
+    if energy <= 0:
+        raise ValueError("energy_capacity_mwh must be positive")
+    min_soc = min_pct / 100.0 * energy
+    max_soc = min(max_pct / 100.0 * energy, energy)
+
+    def to_mwh(pct: float) -> float:
+        # Clamp away floating-point noise at the boundaries already validated above.
+        return min(max(pct / 100.0 * energy, min_soc), max_soc)
+
+    return BatteryConfig(
+        energy_capacity_mwh=energy,
+        charge_power_mw=float(charge_power_mw),
+        discharge_power_mw=float(discharge_power_mw),
+        charge_efficiency=base.charge_efficiency,
+        discharge_efficiency=base.discharge_efficiency,
+        min_soc_mwh=min_soc,
+        max_soc_mwh=max_soc,
+        initial_soc_mwh=to_mwh(initial_soc_pct),
+        terminal_soc_mwh=to_mwh(terminal_soc_pct),
+        throughput_cost_eur_per_mwh=base.throughput_cost_eur_per_mwh,
+    )
+
+
 @dataclass(frozen=True)
 class ProjectConfig:
     input_csv: Path

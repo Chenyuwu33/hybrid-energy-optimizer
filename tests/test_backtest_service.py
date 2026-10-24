@@ -80,3 +80,16 @@ def test_service_reuses_capacity_data_path_and_daily_backtest() -> None:
     assert bundle.result.summary["optimized_revenue_eur"] >= bundle.result.summary[
         "baseline_curtail_negative_revenue_eur"
     ]
+
+
+def test_request_soc_below_operating_range_gives_percent_error_before_fetching() -> None:
+    class ExplodingClient:
+        def fetch_hourly_inputs_for_capacity(self, *args, **kwargs):
+            raise AssertionError("data must not be fetched for an invalid battery")
+
+    base = load_config("configs/base.yaml")
+
+    with pytest.raises(ValueError, match=r"Terminal SOC must be between 10% and 100%"):
+        run_historical_backtest(
+            _request(terminal_soc_pct=5.0), base.battery, client=ExplodingClient()
+        )

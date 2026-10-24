@@ -16,6 +16,16 @@ def calculate_baseline_revenue(inputs: pd.DataFrame) -> float:
     return float((inputs["wind_mwh"] * inputs["price_eur_mwh"]).sum())
 
 
+def calculate_curtail_negative_revenue(inputs: pd.DataFrame) -> float:
+    """Revenue for a wind-only asset that curtails whenever the price is negative.
+
+    This baseline needs no battery, so the gap between it and the optimized revenue is the
+    value actually created by the battery rather than by simply avoiding negative prices.
+    """
+    nonnegative_price = inputs["price_eur_mwh"].clip(lower=0.0)
+    return float((inputs["wind_mwh"] * nonnegative_price).sum())
+
+
 def calculate_kpis(
     inputs: pd.DataFrame,
     result: DispatchResult,
@@ -24,6 +34,7 @@ def calculate_kpis(
     """Calculate operational and economic KPIs for one optimized dispatch."""
     dispatch = result.dispatch
     baseline = calculate_baseline_revenue(inputs)
+    curtail_negative = calculate_curtail_negative_revenue(inputs)
     gross_market_revenue = float(
         (dispatch["price_eur_mwh"] * dispatch["grid_export_mwh"]).sum()
     )
@@ -43,6 +54,8 @@ def calculate_kpis(
         "optimized_revenue_eur": float(optimized),
         "revenue_uplift_eur": float(uplift),
         "revenue_uplift_pct": float(uplift_pct),
+        "baseline_curtail_negative_revenue_eur": float(curtail_negative),
+        "battery_incremental_value_eur": float(optimized - curtail_negative),
         "total_wind_mwh": float(dispatch["wind_available_mwh"].sum()),
         "total_grid_export_mwh": total_export,
         "total_battery_charge_mwh": float(dispatch["battery_charge_mwh"].sum()),

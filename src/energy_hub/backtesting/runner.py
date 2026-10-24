@@ -7,6 +7,10 @@ from dataclasses import dataclass
 import pandas as pd
 
 from energy_hub.assets.battery import Battery
+from energy_hub.economics.metrics import (
+    calculate_baseline_revenue,
+    calculate_curtail_negative_revenue,
+)
 from energy_hub.optimization.dispatch import optimize_dispatch
 
 
@@ -36,7 +40,11 @@ def _validate_hourly_days(inputs: pd.DataFrame) -> pd.DataFrame:
     counts = clean.groupby("date", sort=True).size()
     if (counts != 24).any():
         bad = ", ".join(str(day) for day in counts[counts != 24].index)
-        raise ValueError(f"each backtest day must contain exactly 24 hourly records; check {bad}")
+        raise ValueError(
+            f"each backtest day must contain exactly 24 hourly records; check {bad}. "
+            "Missing hours usually mean the source data is incomplete or not yet published "
+            "(settled production data can lag by several days)."
+        )
     return clean
 
 
@@ -59,9 +67,8 @@ def run_daily_backtest(
         dispatch_result = optimize_dispatch(hourly, battery, solver=solver)
         dispatch = dispatch_result.dispatch
 
-        sell_all = float((hourly["wind_mwh"] * hourly["price_eur_mwh"]).sum())
-        nonnegative_price = hourly["price_eur_mwh"].clip(lower=0.0)
-        curtail_negative = float((hourly["wind_mwh"] * nonnegative_price).sum())
+        sell_all = calculate_baseline_revenue(hourly)
+        curtail_negative = calculate_curtail_negative_revenue(hourly)
         throughput = float(
             dispatch["battery_charge_mwh"].sum() + dispatch["battery_discharge_mwh"].sum()
         )

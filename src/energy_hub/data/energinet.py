@@ -113,12 +113,15 @@ def normalize_wind_records(records: list[dict[str, Any]]) -> pd.DataFrame:
     if missing:
         raise ValueError(f"wind records missing required columns: {sorted(missing)}")
 
-    numeric = raw[_WIND_COLUMNS].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    numeric = raw[_WIND_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    # A blank sub-category (e.g. no small offshore parks) counts as zero, but an hour where
+    # every relevant column is blank is missing data, not zero wind. Keep it as NaN so it is
+    # dropped downstream and surfaces as an incomplete day instead of silently biasing results.
     result = pd.DataFrame(
         {
             "timestamp": _utc_naive(raw["HourUTC"]),
-            "dk1_wind_mwh": numeric.sum(axis=1),
-            "dk1_onshore_wind_mwh": numeric[_ONSHORE_WIND_COLUMNS].sum(axis=1),
+            "dk1_wind_mwh": numeric.sum(axis=1, min_count=1),
+            "dk1_onshore_wind_mwh": numeric[_ONSHORE_WIND_COLUMNS].sum(axis=1, min_count=1),
         }
     )
     return result.sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
@@ -139,6 +142,7 @@ def build_hourly_inputs(
         raise ValueError("wind_share must be greater than 0 and no greater than 1")
 
     merged = prices.merge(wind, on="timestamp", how="inner", validate="one_to_one")
+    merged = merged.dropna(subset=["dk1_wind_mwh"])
     if merged.empty:
         raise ValueError("price and wind datasets have no overlapping hourly timestamps")
 
@@ -307,7 +311,9 @@ class EnerginetClient:
         wind = self.fetch_hourly_wind(api_start, api_end, price_area)
 
         requested_prices = _trim_utc_period(prices, start, end)
-        requested_wind = _trim_utc_period(wind, start, end)
+        requested_wind = _trim_utc_period(wind, start, end).dropna(
+            subset=["dk1_onshore_wind_mwh"]
+        )
         if requested_prices.empty or requested_wind.empty:
             raise ValueError("Energinet data contains no records in the requested UTC period")
 

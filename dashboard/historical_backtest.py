@@ -10,6 +10,7 @@ import streamlit as st
 from energy_hub.backtesting.service import (
     HistoricalBacktestRequest,
     run_historical_backtest,
+    soc_percent_bounds,
 )
 from energy_hub.config import ProjectConfig
 from energy_hub.presentation.charts import (
@@ -36,6 +37,8 @@ def render_historical_backtest(base: ProjectConfig) -> None:
     st.subheader("Historical DK1 backtest")
     st.caption("End date is exclusive. Historical settlement data can be published with delay.")
     _methodology_note()
+    min_soc_pct, max_soc_pct = soc_percent_bounds(base.battery)
+    default_soc_pct = min(max(50.0, min_soc_pct), max_soc_pct)
 
     with st.form("historical_backtest_form"):
         d1, d2, d3 = st.columns(3)
@@ -64,10 +67,18 @@ def render_historical_backtest(base: ProjectConfig) -> None:
                 value=float(base.battery.discharge_power_mw),
             )
             initial_soc_pct = st.number_input(
-                "Initial SOC (%)", min_value=0.0, max_value=100.0, value=50.0
+                "Initial SOC (%)",
+                min_value=min_soc_pct,
+                max_value=max_soc_pct,
+                value=default_soc_pct,
+                help=f"Operating SOC range: {min_soc_pct:g}–{max_soc_pct:g}% of battery energy.",
             )
             terminal_soc_pct = st.number_input(
-                "Terminal SOC (%)", min_value=0.0, max_value=100.0, value=50.0
+                "Terminal SOC (%)",
+                min_value=min_soc_pct,
+                max_value=max_soc_pct,
+                value=default_soc_pct,
+                help=f"Operating SOC range: {min_soc_pct:g}–{max_soc_pct:g}% of battery energy.",
             )
             solver = st.selectbox("Historical solver", ["highs", "gurobi"], index=0)
 
