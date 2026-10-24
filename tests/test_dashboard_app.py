@@ -56,3 +56,16 @@ def test_sizing_tab_runs_on_sample_data() -> None:
     assert not app.exception
     assert not app.error or "positive NPV" in app.error[0].value
     assert len(app.dataframe) >= 1
+
+
+def test_sample_tab_grid_charging_toggle_reports_imports() -> None:
+    app_path = Path(__file__).resolve().parents[1] / "dashboard" / "app.py"
+    app = AppTest.from_file(app_path, default_timeout=20).run()
+
+    app.checkbox(key="sample_grid_charging").check()
+    app.number_input(key="sample_import_fee").set_value(0.0)
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert not app.error
+    assert any("Grid charging:" in c.value for c in app.caption)

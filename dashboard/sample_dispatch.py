@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import streamlit as st
+from grid_controls import grid_charging_inputs, grid_limit_input
 
 from energy_hub.config import ProjectConfig, resize_battery_config, soc_percent_bounds
 from energy_hub.presentation.charts import (
@@ -63,16 +64,11 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
                 value=_base_pct(base_battery.terminal_soc_mwh),
                 help=soc_help,
             )
-            grid_limit_input = st.number_input(
-                "Grid export limit (MW)",
-                min_value=0.0,
-                value=float(base.grid_export_limit_mw or 0.0),
-                help=(
-                    "Maximum export at the connection point "
-                    "(wind to grid + battery discharge). 0 = unconstrained."
-                ),
-            )
+            grid_limit = grid_limit_input(base)
             solver = st.selectbox("Solver", ["highs", "gurobi"], index=0)
+
+        with st.expander("Grid charging (arbitrage)"):
+            grid_charging = grid_charging_inputs(base, "sample")
 
         submitted = st.form_submit_button("Run sample optimization", type="primary")
 
@@ -89,8 +85,12 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
             initial_soc_pct=float(initial_soc_pct),
             terminal_soc_pct=float(terminal_soc_pct),
         )
-        grid_limit = float(grid_limit_input) if grid_limit_input > 0 else None
-        config = replace(base, battery=battery, grid_export_limit_mw=grid_limit)
+        config = replace(
+            base,
+            battery=battery,
+            grid_export_limit_mw=grid_limit,
+            grid_charging=grid_charging,
+        )
         result = run_case(config, solver_override=solver)
     except (ValueError, RuntimeError) as exc:
         st.error(str(exc))
@@ -111,6 +111,12 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
         help="Optimized revenue minus a wind-only baseline that curtails at negative prices.",
     )
     c5.metric("Equivalent cycles", f"{kpis['equivalent_full_cycles']:.2f}")
+    if grid_charging.enabled:
+        st.caption(
+            f"Grid charging: {kpis['total_grid_import_mwh']:,.1f} MWh bought for "
+            f"€{kpis['grid_import_cost_eur']:,.0f} (including the import fee), already "
+            "deducted from the optimized revenue."
+        )
     if grid_limit is not None:
         st.caption(
             f"Grid export limit {grid_limit:g} MW was binding in "

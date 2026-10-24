@@ -9,7 +9,12 @@ import pandas as pd
 
 from energy_hub.assets.battery import Battery
 from energy_hub.backtesting.runner import run_daily_backtest
-from energy_hub.config import BatteryConfig, resize_battery_config, soc_percent_bounds
+from energy_hub.config import (
+    BatteryConfig,
+    GridChargingConfig,
+    resize_battery_config,
+    soc_percent_bounds,
+)
 from energy_hub.economics.investment import InvestmentAssumptions, evaluate_battery_investment
 
 DAYS_PER_YEAR = 365.0
@@ -39,6 +44,7 @@ class SizingResult:
     annualization_factor: float
     assumptions: InvestmentAssumptions
     grid_export_limit_mw: float | None
+    grid_charging_enabled: bool = False
 
     @property
     def best(self) -> pd.Series | None:
@@ -76,6 +82,7 @@ def run_sizing_sweep(
     *,
     solver: str = "highs",
     grid_export_limit_mw: float | None = None,
+    grid_charging: GridChargingConfig | None = None,
     initial_soc_pct: float | None = None,
     terminal_soc_pct: float | None = None,
     max_cases: int = MAX_SWEEP_CASES,
@@ -133,7 +140,11 @@ def run_sizing_sweep(
                 )
             )
             backtest = run_daily_backtest(
-                inputs, battery, solver=solver, grid_export_limit_mw=grid_export_limit_mw
+                inputs,
+                battery,
+                solver=solver,
+                grid_export_limit_mw=grid_export_limit_mw,
+                grid_charging=grid_charging,
             )
             days = int(backtest.summary["days"])
             factor = DAYS_PER_YEAR / days
@@ -166,4 +177,5 @@ def run_sizing_sweep(
         annualization_factor=DAYS_PER_YEAR / days,
         assumptions=assumptions,
         grid_export_limit_mw=grid_export_limit_mw,
+        grid_charging_enabled=bool(grid_charging and grid_charging.enabled),
     )

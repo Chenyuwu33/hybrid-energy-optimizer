@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from energy_hub.assets.battery import Battery
+from energy_hub.config import GridChargingConfig
 from energy_hub.optimization.dispatch import optimize_dispatch
 
 
@@ -152,3 +153,79 @@ def test_lossless_storage_does_not_charge_and_discharge_in_the_same_hour() -> No
     assert dispatch["battery_charge_mwh"].sum() == pytest.approx(20.0)
     # The reported objective is pure market revenue; the tie-break cost is not included.
     assert result.objective_eur == pytest.approx(2 * 20 * 10.0 + 2 * 10 * 100.0, abs=1e-9)
+
+
+def _grid_charging(fee: float = 0.0, limit: float | None = None) -> GridChargingConfig:
+    return GridChargingConfig(enabled=True, import_fee_eur_per_mwh=fee, import_limit_mw=limit)
+
+
+def test_grid_charging_is_off_by_default_even_when_profitable() -> None:
+    inputs = _inputs([10.0, 100.0], wind=[0.0, 0.0])
+
+    for charging in (None, GridChargingConfig(enabled=False)):
+        dispatch = optimize_dispatch(inputs, _battery(), grid_charging=charging).dispatch
+        assert dispatch["grid_import_mwh"].sum() == pytest.approx(0.0)
+
+
+def test_grid_charging_buys_cheap_sells_dear_net_of_import_fee() -> None:
+    inputs = _inputs([10.0, 100.0], wind=[0.0, 0.0])
+
+    result = optimize_dispatch(inputs, _battery(), grid_charging=_grid_charging(fee=5.0))
+
+    dispatch = result.dispatch
+    assert dispatch["grid_import_mwh"].tolist() == pytest.approx([10.0, 0.0])
+    assert dispatch["battery_discharge_mwh"].tolist() == pytest.approx([0.0, 10.0])
+    assert dispatch["battery_charge_from_wind_mwh"].sum() == pytest.approx(0.0)
+    assert result.objective_eur == pytest.approx(10 * 100.0 - 10 * (10.0 + 5.0))
+
+
+def test_import_fee_larger_than_the_spread_prevents_arbitrage() -> None:
+    inputs = _inputs([10.0, 15.0], wind=[0.0, 0.0])
+
+    result = optimize_dispatch(inputs, _battery(), grid_charging=_grid_charging(fee=10.0))
+
+    assert result.dispatch["grid_import_mwh"].sum() == pytest.approx(0.0)
+    assert result.objective_eur == pytest.approx(0.0)
+
+
+def test_wind_and_grid_charging_share_the_battery_charge_power() -> None:
+    inputs = _inputs([10.0, 100.0], wind=[6.0, 0.0])
+
+    result = optimize_dispatch(inputs, _battery(), grid_charging=_grid_charging(fee=5.0))
+
+    dispatch = result.dispatch
+    # Charging from wind forgoes 10 EUR/MWh of export; importing costs 15, so wind goes first
+    # and the grid tops up to the 10 MW charge limit.
+    assert dispatch["battery_charge_from_wind_mwh"].iloc[0] == pytest.approx(6.0)
+    assert dispatch["grid_import_mwh"].iloc[0] == pytest.approx(4.0)
+    assert dispatch["battery_charge_mwh"].max() <= 10.0 + 1e-7
+    assert result.objective_eur == pytest.approx(10 * 100.0 - 4 * 15.0)
+
+
+def test_grid_import_limit_caps_hourly_imports() -> None:
+    inputs = _inputs([10.0, 100.0], wind=[0.0, 0.0])
+
+    result = optimize_dispatch(inputs, _battery(), grid_charging=_grid_charging(limit=3.0))
+
+    assert result.dispatch["grid_import_mwh"].max() <= 3.0 + 1e-7
+    assert result.objective_eur == pytest.approx(3 * 100.0 - 3 * 10.0)
+
+
+def test_grid_charging_is_paid_to_import_at_negative_prices() -> None:
+    inputs = _inputs([-20.0, 50.0], wind=[0.0, 0.0])
+
+    result = optimize_dispatch(inputs, _battery(), grid_charging=_grid_charging())
+
+    assert result.dispatch["grid_import_mwh"].iloc[0] == pytest.approx(10.0)
+    assert result.objective_eur == pytest.approx(10 * 20.0 + 10 * 50.0)
+
+
+def test_dispatch_reports_wind_and_grid_charging_separately() -> None:
+    dispatch = optimize_dispatch(_inputs([10.0, 20.0]), _battery()).dispatch
+
+    assert {"battery_charge_from_wind_mwh", "grid_import_mwh"}.issubset(dispatch.columns)
+    assert (
+        dispatch["wind_to_grid_mwh"]
+        + dispatch["battery_charge_from_wind_mwh"]
+        + dispatch["curtailment_mwh"]
+    ).to_numpy() == pytest.approx(dispatch["wind_available_mwh"].to_numpy())

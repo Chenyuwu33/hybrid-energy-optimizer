@@ -7,6 +7,7 @@ from datetime import date, timedelta
 import pandas as pd
 import requests
 import streamlit as st
+from grid_controls import grid_charging_inputs, grid_limit_input
 
 from energy_hub.backtesting.service import (
     HistoricalBacktestRequest,
@@ -66,7 +67,8 @@ def _methodology_note() -> None:
         "installed capacity. It is not an individual wind farm's SCADA trace. Historical "
         "prices and wind are realized values, so this is a perfect-information benchmark, "
         "not realized trading PnL or investment advice. An optional grid export limit applies to "
-        "the optimizer and both baselines alike. Battery degradation is not yet included."
+        "the optimizer and both baselines alike; optional grid charging pays the market price "
+        "plus an import fee. Battery degradation is not yet included."
     )
 
 
@@ -119,16 +121,11 @@ def render_historical_backtest(base: ProjectConfig) -> None:
                 value=default_soc_pct,
                 help=f"Operating SOC range: {min_soc_pct:g}–{max_soc_pct:g}% of battery energy.",
             )
-            grid_limit_input = st.number_input(
-                "Grid export limit (MW)",
-                min_value=0.0,
-                value=float(base.grid_export_limit_mw or 0.0),
-                help=(
-                    "Maximum export at the connection point "
-                    "(wind to grid + battery discharge). 0 = unconstrained."
-                ),
-            )
+            grid_limit = grid_limit_input(base)
             solver = st.selectbox("Historical solver", ["highs", "gurobi"], index=0)
+
+        with st.expander("Grid charging (arbitrage)"):
+            grid_charging = grid_charging_inputs(base, "historical")
 
         submitted = st.form_submit_button("Run historical backtest", type="primary")
 
@@ -148,7 +145,8 @@ def render_historical_backtest(base: ProjectConfig) -> None:
             initial_soc_pct=float(initial_soc_pct),
             terminal_soc_pct=float(terminal_soc_pct),
             solver=solver,
-            grid_export_limit_mw=float(grid_limit_input) if grid_limit_input > 0 else None,
+            grid_export_limit_mw=grid_limit,
+            grid_charging=grid_charging,
         )
         bundle = run_historical_backtest(
             request, base.battery, client=CachedEnerginetClient()
@@ -180,6 +178,12 @@ def render_historical_backtest(base: ProjectConfig) -> None:
         f"€{summary['total_uplift_vs_sell_all_eur']:,.0f}",
     )
     bottom[3].metric("Equivalent full cycles", f"{summary['equivalent_full_cycles']:.2f}")
+    if grid_charging.enabled:
+        st.caption(
+            f"Grid charging bought {summary['grid_import_mwh']:,.0f} MWh "
+            f"(import fee €{grid_charging.import_fee_eur_per_mwh:g}/MWh); import costs are "
+            "already deducted from the optimized revenue and the battery value."
+        )
 
     st.plotly_chart(
         historical_wind_price_figure(bundle.inputs, request.grid_export_limit_mw),

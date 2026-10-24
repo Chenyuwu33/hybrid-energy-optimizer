@@ -123,3 +123,35 @@ def test_investment_assumptions_load_from_yaml_with_defaults(tmp_path: Path) -> 
     unknown.write_text(text + "  capex_typo: 1\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Invalid investment configuration"):
         load_config(unknown)
+
+
+def test_grid_charging_section_loads_and_validates(tmp_path: Path) -> None:
+    from energy_hub.config import GridChargingConfig
+
+    base = load_config("configs/base.yaml")
+    assert base.grid_charging == GridChargingConfig(
+        enabled=False, import_limit_mw=None, import_fee_eur_per_mwh=10.0
+    )
+
+    text = Path("configs/base.yaml").read_text(encoding="utf-8")
+    enabled = tmp_path / "enabled.yaml"
+    enabled.write_text(
+        text.replace("  enabled: false", "  enabled: true").replace(
+            "  import_limit_mw: null", "  import_limit_mw: 40"
+        ),
+        encoding="utf-8",
+    )
+    loaded = load_config(enabled).grid_charging
+    assert loaded.enabled is True
+    assert loaded.import_limit_mw == pytest.approx(40.0)
+
+    for old, new, match in [
+        ("  enabled: false", "  enabled: maybe", "enabled"),
+        ("import_fee_eur_per_mwh: 10.0", "import_fee_eur_per_mwh: -1", "import_fee"),
+        ("  import_limit_mw: null", "  import_limit_mw: 0", "import_limit"),
+        ("  enabled: false", "  enabled: false\n  typo: 1", "Invalid grid_charging"),
+    ]:
+        bad = tmp_path / "bad.yaml"
+        bad.write_text(text.replace(old, new), encoding="utf-8")
+        with pytest.raises(ValueError, match=match):
+            load_config(bad)

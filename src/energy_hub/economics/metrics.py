@@ -48,11 +48,14 @@ def calculate_kpis(
     result: DispatchResult,
     battery: Battery,
     grid_export_limit_mw: float | None = None,
+    grid_import_fee_eur_per_mwh: float = 0.0,
 ) -> dict[str, float | str]:
     """Calculate operational and economic KPIs for one optimized dispatch.
 
     Pass the same ``grid_export_limit_mw`` used for optimization so the baselines face the
-    same connection constraint and the battery's value is not overstated.
+    same connection constraint and the battery's value is not overstated. When the battery
+    charged from the grid, imports are paid at the market price plus
+    ``grid_import_fee_eur_per_mwh`` and deducted from the optimized revenue.
     """
     dispatch = result.dispatch
     baseline = calculate_baseline_revenue(inputs, grid_export_limit_mw)
@@ -60,10 +63,19 @@ def calculate_kpis(
     gross_market_revenue = float(
         (dispatch["price_eur_mwh"] * dispatch["grid_export_mwh"]).sum()
     )
+    if "grid_import_mwh" in dispatch.columns:
+        grid_import = dispatch["grid_import_mwh"]
+    else:
+        grid_import = pd.Series(0.0, index=dispatch.index)
+    import_cost = float(
+        ((dispatch["price_eur_mwh"] + float(grid_import_fee_eur_per_mwh)) * grid_import).sum()
+    )
     throughput = float(
         dispatch["battery_charge_mwh"].sum() + dispatch["battery_discharge_mwh"].sum()
     )
-    optimized = gross_market_revenue - battery.throughput_cost_eur_per_mwh * throughput
+    optimized = (
+        gross_market_revenue - import_cost - battery.throughput_cost_eur_per_mwh * throughput
+    )
     uplift = optimized - baseline
     uplift_pct = 0.0 if abs(baseline) < 1e-12 else uplift / baseline * 100.0
 
@@ -83,6 +95,8 @@ def calculate_kpis(
         "total_battery_charge_mwh": float(dispatch["battery_charge_mwh"].sum()),
         "total_battery_discharge_mwh": float(dispatch["battery_discharge_mwh"].sum()),
         "total_curtailment_mwh": float(dispatch["curtailment_mwh"].sum()),
+        "total_grid_import_mwh": float(grid_import.sum()),
+        "grid_import_cost_eur": import_cost,
         "average_realized_price_eur_per_mwh": float(realized_price),
         "equivalent_full_cycles": float(cycles),
         "min_soc_mwh": float(dispatch["soc_mwh"].min()),

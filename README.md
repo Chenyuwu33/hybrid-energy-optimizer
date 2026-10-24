@@ -112,6 +112,22 @@ The limit caps `wind_to_grid + battery_discharge` in every hour. Wind above it m
 
 A limit does not automatically make the battery more valuable: if wind already fills the connection in most hours, there is little headroom left to discharge into. The battery earns the most when wind regularly exceeds the limit in some hours and falls below it in others.
 
+#### Optional grid charging (arbitrage)
+
+By default the battery charges from wind only. Enable `grid_charging` in the YAML configuration, or pass `--grid-charging` to `run`, `backtest` or `size`, to let it also buy from the grid:
+
+```bash
+energy-hub run --config configs/base.yaml --grid-charging --import-fee 10
+```
+
+- Imports pay the hourly market price **plus** `import_fee_eur_per_mwh` (default €10/MWh, roughly Energinet's 2026 system tariff of 7.2 øre/kWh; distribution-connected sites pay about €6/MWh more in net tariff, and capacity charges and electricity taxes are not included — check what applies to your site).
+- Wind and grid charging share the battery's charge power; `import_limit_mw` optionally caps imports at the connection.
+- At negative prices the battery is paid to import, which the model captures.
+- Revenues and the battery value are reported **net of import costs**; `kpis.json` adds `total_grid_import_mwh` and `grid_import_cost_eur`, and the dispatch splits `battery_charge_from_wind_mwh` from `grid_import_mwh`. The battery-less baselines never import.
+- `--no-grid-charging` forces it off; `--import-limit-mw` overrides the limit. Each dashboard tab has the same controls under **Grid charging (arbitrage)**.
+
+Many wind support schemes forbid co-located storage from importing, so check the rules for the asset before relying on arbitrage value.
+
 ### 3. Run the v0.2-compatible historical CLI backtest
 
 The command below replays seven complete UTC days using a hypothetical portfolio equal to 5% of aggregate settled DK1 wind production:
@@ -161,7 +177,7 @@ Outputs `sizing.csv` and `sizing_summary.json` (including the highest-NPV size, 
 
 Investment assumptions live in the `investment:` section of the YAML configuration. The defaults (€100k/MWh energy, €250k/MW power, 2 % O&M, 15 years, 8 % discount rate, 2 %/yr value degradation) are placeholders within published 2025–2026 ranges: BNEF's 2025 survey put average turnkey system prices at about $177/kWh in Europe (global 2-hour $124/kWh, 4-hour $110/kWh), while Modo Energy's September 2026 global medians, which include grid connection, were about $325k/MWh for 2-hour and $201k/MWh for 4-hour projects. Grid-connection cost varies most between sites, so replace these with project quotes.
 
-Read the results with care: the backtest has perfect foresight, so values are an upper bound; the battery charges from wind only (no grid arbitrage or ancillary-service revenue, which usually dominate standalone BESS business cases); and a short backtest period is scaled to a full year (the CLI and dashboard warn below 28 days).
+Read the results with care: the backtest has perfect foresight, so values are an upper bound; ancillary-service revenue, which often dominates BESS business cases, is not modelled, and grid arbitrage only counts when grid charging is enabled; and a short backtest period is scaled to a full year (the CLI and dashboard warn below 28 days).
 
 ### 5. Launch the dashboard
 
@@ -282,11 +298,17 @@ For every hour `t`:
 
 ```text
 wind_available[t]
-  = wind_to_grid[t] + battery_charge[t] + curtailment[t]
+  = wind_to_grid[t] + charge_from_wind[t] + curtailment[t]
+
+battery_charge[t]
+  = charge_from_wind[t] + grid_import[t]      (grid_import = 0 unless grid charging is on)
+  <= charge_power
 
 grid_export[t]
   = wind_to_grid[t] + battery_discharge[t]
   <= grid_export_limit          (optional)
+
+grid_import[t] <= grid_import_limit           (optional)
 
 soc[t]
   = soc[t-1]
@@ -298,10 +320,11 @@ The objective maximizes:
 
 ```text
 sum(price[t] * grid_export[t])
-- throughput_cost * sum(charge[t] + discharge[t])
+- sum((price[t] + import_fee) * grid_import[t])
+- throughput_cost * sum(battery_charge[t] + battery_discharge[t])
 ```
 
-The battery can currently charge from wind only. Grid-to-battery arbitrage is deliberately left for a later market-focused extension.
+Inside the solver only, a negligible tie-break cost (1e-4 EUR/MWh) on throughput stops lossless or zero-cost storage from charging and discharging in the same hour; reported revenues exclude it.
 
 ## Project structure
 
@@ -418,6 +441,7 @@ Completed foundation:
 - [x] Interactive historical DK1 dashboard with capacity-based onshore profile scaling
 - [x] Optional grid-connection export limit (optimizer, baselines, CLI, dashboard)
 - [x] BESS sizing sweep with NPV / IRR / payback appraisal (CLI and dashboard)
+- [x] Optional grid charging (price arbitrage) with import fee and import limit
 
 Next priorities:
 
