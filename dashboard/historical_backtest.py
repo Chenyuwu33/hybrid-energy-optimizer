@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
+import pandas as pd
 import requests
 import streamlit as st
 
@@ -13,12 +14,49 @@ from energy_hub.backtesting.service import (
     soc_percent_bounds,
 )
 from energy_hub.config import ProjectConfig
+from energy_hub.data.energinet import EnerginetClient
 from energy_hub.presentation.charts import (
     daily_battery_value_figure,
     daily_cycles_figure,
     daily_revenue_figure,
     historical_wind_price_figure,
 )
+
+# Settled production data is published with a lag, so default to a recent complete week
+# that is very likely already available.
+_DEFAULT_LAG_DAYS = 14
+_DEFAULT_WINDOW_DAYS = 7
+_CACHE_TTL_SECONDS = 6 * 60 * 60
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Fetching Energinet data…")
+def _fetch_inputs_cached(
+    start: date, end: date, price_area: str, wind_capacity_mw: float
+) -> pd.DataFrame:
+    """Fetch normalized hourly inputs once per scenario and reuse them across reruns.
+
+    Changing only battery assumptions reruns the optimizer without hitting the API again.
+    """
+    return EnerginetClient().fetch_hourly_inputs_for_capacity(
+        start=start,
+        end=end,
+        price_area=price_area,
+        wind_capacity_mw=wind_capacity_mw,
+    )
+
+
+class _CachedEnerginetClient:
+    """HistoricalDataClient backed by Streamlit's data cache."""
+
+    def fetch_hourly_inputs_for_capacity(
+        self, start: date, end: date, price_area: str, wind_capacity_mw: float
+    ) -> pd.DataFrame:
+        return _fetch_inputs_cached(start, end, price_area, float(wind_capacity_mw)).copy()
+
+
+def _default_period(today: date | None = None) -> tuple[date, date]:
+    end = (today or date.today()) - timedelta(days=_DEFAULT_LAG_DAYS)
+    return end - timedelta(days=_DEFAULT_WINDOW_DAYS), end
 
 
 def _methodology_note() -> None:
@@ -44,8 +82,9 @@ def render_historical_backtest(base: ProjectConfig) -> None:
         d1, d2, d3 = st.columns(3)
         with d1:
             area = st.selectbox("Market area", ["DK1"], index=0)
-            start = st.date_input("Start date", value=date(2026, 9, 1))
-            end = st.date_input("End date (exclusive)", value=date(2026, 9, 8))
+            default_start, default_end = _default_period()
+            start = st.date_input("Start date", value=default_start)
+            end = st.date_input("End date (exclusive)", value=default_end)
         with d2:
             wind_capacity_mw = st.number_input(
                 "Hypothetical onshore wind farm (MW)", min_value=1.0, value=100.0
@@ -101,7 +140,9 @@ def render_historical_backtest(base: ProjectConfig) -> None:
             terminal_soc_pct=float(terminal_soc_pct),
             solver=solver,
         )
-        bundle = run_historical_backtest(request, base.battery)
+        bundle = run_historical_backtest(
+            request, base.battery, client=_CachedEnerginetClient()
+        )
     except (ValueError, RuntimeError, OSError, requests.RequestException) as exc:
         st.error(str(exc))
         return
@@ -130,11 +171,11 @@ def render_historical_backtest(base: ProjectConfig) -> None:
     )
     bottom[3].metric("Equivalent full cycles", f"{summary['equivalent_full_cycles']:.2f}")
 
-    st.plotly_chart(historical_wind_price_figure(bundle.inputs), use_container_width=True)
+    st.plotly_chart(historical_wind_price_figure(bundle.inputs), width="stretch")
     daily = bundle.result.daily
-    st.plotly_chart(daily_battery_value_figure(daily), use_container_width=True)
-    st.plotly_chart(daily_revenue_figure(daily), use_container_width=True)
-    st.plotly_chart(daily_cycles_figure(daily), use_container_width=True)
+    st.plotly_chart(daily_battery_value_figure(daily), width="stretch")
+    st.plotly_chart(daily_revenue_figure(daily), width="stretch")
+    st.plotly_chart(daily_cycles_figure(daily), width="stretch")
 
     st.subheader("Daily results")
-    st.dataframe(daily, use_container_width=True, hide_index=True)
+    st.dataframe(daily, width="stretch", hide_index=True)

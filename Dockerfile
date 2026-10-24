@@ -16,4 +16,7 @@ COPY case_studies ./case_studies
 RUN python -m pip install --upgrade pip && \
     python -m pip install .
 
+# Streamlit dashboard port (see README: "Run the dashboard in Docker").
+EXPOSE 8501
+
 CMD ["energy-hub", "--help"]
