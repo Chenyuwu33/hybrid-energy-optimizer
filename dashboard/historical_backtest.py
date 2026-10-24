@@ -65,8 +65,8 @@ def _methodology_note() -> None:
         "capacity-factor profile derived from settled onshore production and monthly onshore "
         "installed capacity. It is not an individual wind farm's SCADA trace. Historical "
         "prices and wind are realized values, so this is a perfect-information benchmark, "
-        "not realized trading PnL or investment advice. Battery degradation and grid-connection "
-        "limits are not yet included in v0.2.1."
+        "not realized trading PnL or investment advice. An optional grid export limit applies to "
+        "the optimizer and both baselines alike. Battery degradation is not yet included."
     )
 
 
@@ -119,6 +119,15 @@ def render_historical_backtest(base: ProjectConfig) -> None:
                 value=default_soc_pct,
                 help=f"Operating SOC range: {min_soc_pct:g}–{max_soc_pct:g}% of battery energy.",
             )
+            grid_limit_input = st.number_input(
+                "Grid export limit (MW)",
+                min_value=0.0,
+                value=float(base.grid_export_limit_mw or 0.0),
+                help=(
+                    "Maximum export at the connection point "
+                    "(wind to grid + battery discharge). 0 = unconstrained."
+                ),
+            )
             solver = st.selectbox("Historical solver", ["highs", "gurobi"], index=0)
 
         submitted = st.form_submit_button("Run historical backtest", type="primary")
@@ -139,6 +148,7 @@ def render_historical_backtest(base: ProjectConfig) -> None:
             initial_soc_pct=float(initial_soc_pct),
             terminal_soc_pct=float(terminal_soc_pct),
             solver=solver,
+            grid_export_limit_mw=float(grid_limit_input) if grid_limit_input > 0 else None,
         )
         bundle = run_historical_backtest(
             request, base.battery, client=_CachedEnerginetClient()
@@ -171,7 +181,10 @@ def render_historical_backtest(base: ProjectConfig) -> None:
     )
     bottom[3].metric("Equivalent full cycles", f"{summary['equivalent_full_cycles']:.2f}")
 
-    st.plotly_chart(historical_wind_price_figure(bundle.inputs), width="stretch")
+    st.plotly_chart(
+        historical_wind_price_figure(bundle.inputs, request.grid_export_limit_mw),
+        width="stretch",
+    )
     daily = bundle.result.daily
     st.plotly_chart(daily_battery_value_figure(daily), width="stretch")
     st.plotly_chart(daily_revenue_figure(daily), width="stretch")

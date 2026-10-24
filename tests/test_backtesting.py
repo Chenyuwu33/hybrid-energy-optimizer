@@ -69,3 +69,16 @@ def test_daily_backtest_preserves_terminal_soc_each_day() -> None:
     result = run_daily_backtest(_two_day_inputs(), _battery(), solver="highs")
 
     assert result.daily["ending_soc_mwh"].tolist() == pytest.approx([50.0, 50.0])
+
+
+def test_daily_backtest_applies_grid_limit_to_optimizer_and_baselines() -> None:
+    inputs = _two_day_inputs()
+
+    result = run_daily_backtest(inputs, _battery(), solver="highs", grid_export_limit_mw=40.0)
+
+    daily = result.daily
+    # Wind is 50 MWh/h, so a battery-less asset can export at most 40 MWh/h.
+    first_day = inputs.iloc[:24]
+    expected_sell_all = float((first_day["price_eur_mwh"] * 40.0).sum())
+    assert daily.loc[0, "baseline_sell_all_revenue_eur"] == pytest.approx(expected_sell_all)
+    assert (daily["battery_incremental_vs_curtail_eur"] >= -1e-6).all()

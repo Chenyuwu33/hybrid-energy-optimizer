@@ -68,3 +68,36 @@ def test_core_imports_do_not_load_streamlit() -> None:
     importlib.import_module("energy_hub.optimization.dispatch")
     importlib.import_module("energy_hub.economics.metrics")
     assert "streamlit" not in sys.modules
+
+
+def test_cli_grid_limit_override_constrains_export_and_reports_limit(
+    tmp_path: Path, capsys
+) -> None:
+    config_raw = yaml.safe_load(Path("configs/base.yaml").read_text(encoding="utf-8"))
+    config_raw["input_csv"] = str(Path("data/sample/sample_24h.csv").resolve())
+    config_raw["output_dir"] = str(tmp_path / "outputs")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config_raw), encoding="utf-8")
+
+    exit_code = main(
+        ["run", "--config", str(config_path), "--solver", "highs", "--grid-limit-mw", "50"]
+    )
+
+    assert exit_code == 0
+    assert "Grid export limit:  50 MW" in capsys.readouterr().out
+    payload = json.loads((tmp_path / "outputs" / "kpis.json").read_text(encoding="utf-8"))
+    assert payload["grid_export_limit_mw"] == 50.0
+    assert payload["optimized_revenue_eur"] >= payload["baseline_curtail_negative_revenue_eur"]
+    dispatch = (tmp_path / "outputs" / "dispatch.csv").read_text(encoding="utf-8")
+    from io import StringIO
+
+    import pandas as pd
+
+    assert pd.read_csv(StringIO(dispatch))["grid_export_mwh"].max() <= 50.0 + 1e-6
+
+
+def test_cli_rejects_nonpositive_grid_limit(tmp_path: Path, capsys) -> None:
+    exit_code = main(["run", "--config", "configs/base.yaml", "--grid-limit-mw", "0"])
+
+    assert exit_code == 1
+    assert "--grid-limit-mw must be positive" in capsys.readouterr().err

@@ -34,7 +34,20 @@ def sample_input_figure(dispatch: pd.DataFrame) -> go.Figure:
     return figure
 
 
-def sample_dispatch_figure(dispatch: pd.DataFrame) -> go.Figure:
+def _add_grid_limit_line(figure: go.Figure, grid_export_limit_mw: float | None) -> None:
+    if grid_export_limit_mw is None:
+        return
+    figure.add_hline(
+        y=float(grid_export_limit_mw),
+        line_dash="dash",
+        annotation_text=f"Grid export limit {grid_export_limit_mw:g} MW",
+        annotation_position="top left",
+    )
+
+
+def sample_dispatch_figure(
+    dispatch: pd.DataFrame, grid_export_limit_mw: float | None = None
+) -> go.Figure:
     """Build the v0.1 optimized hourly-dispatch chart."""
     figure = go.Figure()
     for column, name in [
@@ -49,6 +62,7 @@ def sample_dispatch_figure(dispatch: pd.DataFrame) -> go.Figure:
         title="Optimized hourly dispatch",
         yaxis_title="Energy (MWh)",
     )
+    _add_grid_limit_line(figure, grid_export_limit_mw)
     return figure
 
 
@@ -66,7 +80,9 @@ def sample_soc_figure(dispatch: pd.DataFrame) -> go.Figure:
     return figure
 
 
-def historical_wind_price_figure(inputs: pd.DataFrame) -> go.Figure:
+def historical_wind_price_figure(
+    inputs: pd.DataFrame, grid_export_limit_mw: float | None = None
+) -> go.Figure:
     """Plot hypothetical wind-farm production beside historical DK1 prices."""
     figure = go.Figure()
     figure.add_trace(
@@ -91,6 +107,7 @@ def historical_wind_price_figure(inputs: pd.DataFrame) -> go.Figure:
         yaxis2={"title": "Price (EUR/MWh)", "overlaying": "y", "side": "right"},
         legend={"orientation": "h"},
     )
+    _add_grid_limit_line(figure, grid_export_limit_mw)
     return figure
 
 

@@ -52,23 +52,29 @@ def run_daily_backtest(
     inputs: pd.DataFrame,
     battery: Battery,
     solver: str = "highs",
+    grid_export_limit_mw: float | None = None,
 ) -> BacktestResult:
     """Replay complete UTC days using perfect-information day-ahead optimization.
 
     Every day starts from the configured initial SOC and, when a terminal SOC is configured,
     ends at that same configured target. This keeps daily comparisons independent and avoids
     giving one day free energy from the previous day.
+
+    ``grid_export_limit_mw`` applies the same connection limit to the optimizer and to both
+    battery-less baselines, so the reported battery value is measured like-for-like.
     """
     clean = _validate_hourly_days(inputs)
     daily_rows: list[dict[str, float | str]] = []
 
     for day, group in clean.groupby("date", sort=True):
         hourly = group[["timestamp", "wind_mwh", "price_eur_mwh"]].reset_index(drop=True)
-        dispatch_result = optimize_dispatch(hourly, battery, solver=solver)
+        dispatch_result = optimize_dispatch(
+            hourly, battery, solver=solver, grid_export_limit_mw=grid_export_limit_mw
+        )
         dispatch = dispatch_result.dispatch
 
-        sell_all = calculate_baseline_revenue(hourly)
-        curtail_negative = calculate_curtail_negative_revenue(hourly)
+        sell_all = calculate_baseline_revenue(hourly, grid_export_limit_mw)
+        curtail_negative = calculate_curtail_negative_revenue(hourly, grid_export_limit_mw)
         throughput = float(
             dispatch["battery_charge_mwh"].sum() + dispatch["battery_discharge_mwh"].sum()
         )

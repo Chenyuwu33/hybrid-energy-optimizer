@@ -1,6 +1,9 @@
 input_csv: data/sample/sample_24h.csv
 output_dir: outputs
 solver: highs
+# Grid connection export limit in MW (wind to grid + battery discharge).
+# null = unconstrained connection. Example: 60.0
+grid_export_limit_mw: null
 
 battery:
   energy_capacity_mwh: 100.0

@@ -21,7 +21,7 @@ For every hourly time step, the optimizer decides how available wind energy is s
 - curtailment,
 - and later battery discharge.
 
-It respects battery power, energy, efficiency, SOC, terminal-SOC, and optional throughput-cost constraints.
+It respects battery power, energy, efficiency, SOC, terminal-SOC, optional throughput-cost, and an optional grid-connection export limit.
 
 The project supports three user workflows:
 
@@ -98,6 +98,18 @@ Outputs:
 outputs/dispatch.csv
 outputs/kpis.json
 ```
+
+#### Optional grid export limit
+
+Real wind farms usually connect through a limited grid connection. Set `grid_export_limit_mw` in the YAML configuration, or override it per run:
+
+```bash
+energy-hub run --config configs/base.yaml --solver highs --grid-limit-mw 60
+```
+
+The limit caps `wind_to_grid + battery_discharge` in every hour. Wind above it must be stored or curtailed. **Both battery-less baselines face the same limit** (they curtail the excess), so `battery_incremental_value_eur` stays a like-for-like measure of what the battery adds. With a limit, `kpis.json` also reports `grid_export_limit_mw`, `grid_limit_binding_hours`, and `wind_above_grid_limit_mwh`. `--grid-limit-mw` works for `energy-hub backtest` as well, and both dashboard tabs have a grid-limit input (0 = unconstrained).
+
+A limit does not automatically make the battery more valuable: if wind already fills the connection in most hours, there is little headroom left to discharge into. The battery earns the most when wind regularly exceeds the limit in some hours and falls below it in others.
 
 ### 3. Run the v0.2-compatible historical CLI backtest
 
@@ -220,7 +232,6 @@ The daily backtest is a **perfect-information historical benchmark**: each day's
 v0.2.1 still does not model several effects needed for an investment-grade study, including:
 
 - battery degradation economics beyond the configurable generic throughput-cost hook,
-- grid-connection export limits,
 - forecast error and rolling-horizon operation,
 - imbalance settlement,
 - intraday/balancing/reserve-market participation,
@@ -255,6 +266,7 @@ wind_available[t]
 
 grid_export[t]
   = wind_to_grid[t] + battery_discharge[t]
+  <= grid_export_limit          (optional)
 
 soc[t]
   = soc[t-1]
@@ -384,19 +396,19 @@ Completed foundation:
 - [x] Energinet historical price and settlement-data ingestion
 - [x] Historical daily backtesting with multiple baselines
 - [x] Interactive historical DK1 dashboard with capacity-based onshore profile scaling
+- [x] Optional grid-connection export limit (optimizer, baselines, CLI, dashboard)
 
 Next priorities:
 
 1. Add battery degradation economics and BESS sizing sensitivity
-2. Add a grid-connection export limit
-3. Add hourly historical dispatch export and deeper diagnostic views
-4. Persist normalized market data across sessions (in-session caching is in place)
-5. Add wind- and price-forecast models and quantify forecast economic value
-6. Add rolling-horizon optimization under forecast error
-7. Add day-ahead / intraday / balancing-market extensions
-8. Add electrolyzer and hydrogen-production optimization
-9. Add grid constraints, ED/DC-OPF, and congestion analysis
-10. Add cloud deployment and API service layer
+2. Add hourly historical dispatch export and deeper diagnostic views
+3. Persist normalized market data across sessions (in-session caching is in place)
+4. Add wind- and price-forecast models and quantify forecast economic value
+5. Add rolling-horizon optimization under forecast error
+6. Add day-ahead / intraday / balancing-market extensions
+7. Add electrolyzer and hydrogen-production optimization
+8. Add grid constraints, ED/DC-OPF, and congestion analysis
+9. Add cloud deployment and API service layer
 
 ## Case studies
 

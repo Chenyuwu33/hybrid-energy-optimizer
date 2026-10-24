@@ -97,3 +97,43 @@ def test_unknown_solver_raises_readable_runtime_error() -> None:
 def test_gurobi_without_pyomo_raises_readable_runtime_error() -> None:
     with pytest.raises(RuntimeError, match="gurobi"):
         optimize_dispatch(_inputs([10.0, 20.0]), _battery(), solver="gurobi")
+
+
+def test_grid_export_limit_caps_export_and_battery_absorbs_excess_wind() -> None:
+    # 30 MWh wind in cheap hours behind a 20 MW connection, nothing in expensive hours.
+    inputs = _inputs([10.0, 10.0, 100.0, 100.0], wind=[30.0, 30.0, 0.0, 0.0])
+    battery = _battery()
+
+    result = optimize_dispatch(inputs, battery, solver="highs", grid_export_limit_mw=20.0)
+    dispatch = result.dispatch
+
+    assert dispatch["grid_export_mwh"].max() <= 20.0 + 1e-7
+    # 20 MWh exported per cheap hour, a net 10 MWh stored each, released in expensive hours.
+    net_storage = dispatch["battery_charge_mwh"] - dispatch["battery_discharge_mwh"]
+    assert net_storage.tolist() == pytest.approx([10.0, 10.0, -10.0, -10.0])
+    assert dispatch["grid_export_mwh"].tolist() == pytest.approx([20.0, 20.0, 10.0, 10.0])
+    assert result.objective_eur == pytest.approx(2 * 20 * 10.0 + 2 * 10 * 100.0)
+
+
+def test_grid_export_limit_also_caps_battery_discharge() -> None:
+    inputs = _inputs([10.0, 100.0], wind=[20.0, 15.0])
+    battery = _battery()
+
+    result = optimize_dispatch(inputs, battery, solver="highs", grid_export_limit_mw=20.0)
+
+    # Hour 1 already has 15 MWh of wind, so only 5 MWh of headroom is left for discharge;
+    # storing more than that in hour 0 is worthless. (Charge/discharge splits within an hour
+    # are not unique with lossless storage, so only exports and the hour-1 shift are checked.)
+    dispatch = result.dispatch
+    assert dispatch["grid_export_mwh"].tolist() == pytest.approx([15.0, 20.0])
+    assert dispatch["wind_to_grid_mwh"].iloc[1] + dispatch["battery_discharge_mwh"].iloc[
+        1
+    ] == pytest.approx(20.0)
+    assert dispatch["battery_discharge_mwh"].iloc[1] >= 5.0 - 1e-7
+    assert result.objective_eur == pytest.approx(15.0 * 10.0 + 20.0 * 100.0)
+
+
+@pytest.mark.parametrize("limit", [0.0, -5.0, float("nan"), float("inf")])
+def test_invalid_grid_export_limit_raises_value_error(limit: float) -> None:
+    with pytest.raises(ValueError, match="grid_export_limit_mw"):
+        optimize_dispatch(_inputs([10.0]), _battery(), grid_export_limit_mw=limit)
