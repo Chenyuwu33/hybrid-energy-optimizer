@@ -101,3 +101,53 @@ def test_cli_rejects_nonpositive_grid_limit(tmp_path: Path, capsys) -> None:
 
     assert exit_code == 1
     assert "--grid-limit-mw must be positive" in capsys.readouterr().err
+
+
+def test_cli_size_sweeps_sample_and_writes_ranked_outputs(tmp_path: Path, capsys) -> None:
+    import pandas as pd
+
+    exit_code = main(
+        [
+            "size",
+            "--config",
+            "configs/base.yaml",
+            "--powers",
+            "10,25",
+            "--durations",
+            "1,2",
+            "--grid-limit-mw",
+            "50",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Battery sizing sweep" in out
+    assert "fewer than 28 days" in out
+    table = pd.read_csv(tmp_path / "sizing.csv")
+    assert len(table) == 4
+    summary = json.loads((tmp_path / "sizing_summary.json").read_text(encoding="utf-8"))
+    assert summary["days"] == 1
+    assert summary["grid_export_limit_mw"] == 50.0
+    assert summary["assumptions"]["lifetime_years"] == 15
+
+
+def test_cli_size_requires_complete_historical_arguments(capsys) -> None:
+    exit_code = main(
+        [
+            "size",
+            "--config",
+            "configs/base.yaml",
+            "--powers",
+            "10",
+            "--durations",
+            "1",
+            "--start",
+            "2026-01-01",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "--start, --end and --wind-share together" in capsys.readouterr().err

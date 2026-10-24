@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
+from bess_sizing import render_bess_sizing
 from historical_backtest import render_historical_backtest
 from sample_dispatch import render_sample_dispatch
 
@@ -30,17 +31,22 @@ st.title("Hybrid Energy Optimizer")
 st.caption("Wind + battery decision-support prototype")
 st.markdown(
     """
-Explore the optimizer in two ways: a transparent synthetic 24-hour sample and a
-capacity-based historical DK1 backtest using official Energinet data. Both workflows
-reuse the same wind + BESS optimization core.
+Explore the optimizer with a transparent synthetic 24-hour sample, a capacity-based
+historical DK1 backtest using official Energinet data, and a battery sizing sweep with
+NPV appraisal. All workflows reuse the same wind + BESS optimization core.
 """
 )
 
 base = load_base_config()
-sample_tab, historical_tab = st.tabs(["Sample Dispatch", "Historical DK1 Backtest"])
+sample_tab, historical_tab, sizing_tab = st.tabs(
+    ["Sample Dispatch", "Historical DK1 Backtest", "BESS Sizing"]
+)
 
 with sample_tab:
     render_sample_dispatch(base)
 
 with historical_tab:
     render_historical_backtest(base)
+
+with sizing_tab:
+    render_bess_sizing(base)
