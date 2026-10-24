@@ -115,3 +115,13 @@ def test_sizing_charts_build_from_sweep_table() -> None:
     assert list(heatmap.data[0].y) == ["10 MW", "25 MW"]
     assert heatmap.data[0].zmid == 0.0
     assert len(sizing_value_capex_figure(table).data) == 2
+
+
+def test_dispatch_chart_shows_grid_import_only_when_present() -> None:
+    plain = _dispatch()
+    names = [trace.name for trace in sample_dispatch_figure(plain).data]
+    assert "Grid import" not in names
+
+    with_import = plain.assign(grid_import_mwh=[5.0, 0.0])
+    names = [trace.name for trace in sample_dispatch_figure(with_import).data]
+    assert "Grid import" in names

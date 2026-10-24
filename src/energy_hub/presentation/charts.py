@@ -57,6 +57,10 @@ def sample_dispatch_figure(
         ("curtailment_mwh", "Curtailment"),
     ]:
         figure.add_trace(go.Bar(x=dispatch["timestamp"], y=dispatch[column], name=name))
+    if "grid_import_mwh" in dispatch.columns and (dispatch["grid_import_mwh"] > 1e-9).any():
+        figure.add_trace(
+            go.Bar(x=dispatch["timestamp"], y=dispatch["grid_import_mwh"], name="Grid import")
+        )
     figure.update_layout(
         barmode="group",
         title="Optimized hourly dispatch",

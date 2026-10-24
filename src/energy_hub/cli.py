@@ -14,7 +14,7 @@ import requests
 from energy_hub.assets.battery import Battery
 from energy_hub.backtesting.runner import BacktestResult, run_daily_backtest
 from energy_hub.backtesting.sizing import SizingResult, parse_number_list, run_sizing_sweep
-from energy_hub.config import load_config
+from energy_hub.config import GridChargingConfig, load_config
 from energy_hub.data.energinet import EnerginetClient
 from energy_hub.data.io import load_hourly_inputs
 from energy_hub.run import run_case
@@ -35,7 +35,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Override the solver specified in the YAML configuration",
     )
-    _add_grid_limit_argument(run_parser)
+    _add_grid_arguments(run_parser)
 
     backtest_parser = subparsers.add_parser(
         "backtest",
@@ -67,7 +67,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Output directory; defaults to output_dir from the YAML configuration",
     )
-    _add_grid_limit_argument(backtest_parser)
+    _add_grid_arguments(backtest_parser)
 
     size_parser = subparsers.add_parser(
         "size",
@@ -107,11 +107,11 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Output directory; defaults to output_dir from the YAML configuration",
     )
-    _add_grid_limit_argument(size_parser)
+    _add_grid_arguments(size_parser)
     return parser
 
 
-def _add_grid_limit_argument(parser: argparse.ArgumentParser) -> None:
+def _add_grid_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--grid-limit-mw",
         type=float,
@@ -119,6 +119,55 @@ def _add_grid_limit_argument(parser: argparse.ArgumentParser) -> None:
         help="Override grid_export_limit_mw from the YAML configuration (MW at the "
         "connection point; applies to the optimizer and the baselines)",
     )
+    charging = parser.add_mutually_exclusive_group()
+    charging.add_argument(
+        "--grid-charging",
+        dest="grid_charging",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Allow the battery to charge from the grid (overrides grid_charging.enabled)",
+    )
+    charging.add_argument(
+        "--no-grid-charging",
+        dest="grid_charging",
+        action="store_const",
+        const=False,
+        help="Forbid grid charging (overrides grid_charging.enabled)",
+    )
+    parser.add_argument(
+        "--import-fee",
+        type=float,
+        default=None,
+        help="Override grid_charging.import_fee_eur_per_mwh (EUR/MWh added to the price)",
+    )
+    parser.add_argument(
+        "--import-limit-mw",
+        type=float,
+        default=None,
+        help="Override grid_charging.import_limit_mw (MW at the connection point)",
+    )
+
+
+def _effective_grid_charging(args: argparse.Namespace, config) -> GridChargingConfig:
+    charging = config.grid_charging
+    if args.grid_charging is not None:
+        charging = replace(charging, enabled=args.grid_charging)
+    if args.import_fee is not None:
+        charging = replace(charging, import_fee_eur_per_mwh=float(args.import_fee))
+    if args.import_limit_mw is not None:
+        charging = replace(charging, import_limit_mw=float(args.import_limit_mw))
+    return charging
+
+
+def _print_grid_charging(charging: GridChargingConfig, label_width: int) -> None:
+    if not charging.enabled:
+        return
+    limit = (
+        "unlimited" if charging.import_limit_mw is None else f"{charging.import_limit_mw:g} MW"
+    )
+    label = "Grid charging:".ljust(label_width)
+    print(f"{label}on (import fee €{charging.import_fee_eur_per_mwh:g}/MWh, limit {limit})")
 
 
 def _effective_grid_limit(args: argparse.Namespace, config) -> float | None:
@@ -160,6 +209,7 @@ def _write_sizing_outputs(output_dir: Path, result: SizingResult) -> None:
         "days": result.days,
         "annualization_factor": result.annualization_factor,
         "grid_export_limit_mw": result.grid_export_limit_mw,
+        "grid_charging_enabled": result.grid_charging_enabled,
         "assumptions": vars(result.assumptions),
         "best_size": None if best is None else {
             "power_mw": float(best["power_mw"]),
@@ -205,6 +255,7 @@ def _run_sizing(args: argparse.Namespace) -> int:
     powers = parse_number_list(args.powers, "--powers")
     durations = parse_number_list(args.durations, "--durations")
     grid_limit = _effective_grid_limit(args, config)
+    grid_charging = _effective_grid_charging(args, config)
     output_dir = Path(args.output_dir) if args.output_dir else config.output_dir
     inputs, source = _sizing_inputs(args, config)
 
@@ -216,6 +267,7 @@ def _run_sizing(args: argparse.Namespace) -> int:
         config.investment,
         solver=args.solver or config.solver,
         grid_export_limit_mw=grid_limit,
+        grid_charging=grid_charging,
     )
     _write_sizing_outputs(output_dir, result)
 
@@ -226,6 +278,7 @@ def _run_sizing(args: argparse.Namespace) -> int:
     )
     if grid_limit is not None:
         print(f"Grid export limit:  {grid_limit:g} MW")
+    _print_grid_charging(grid_charging, 20)
     print()
     print(f"{'Power':>8} {'Hours':>6} {'Annual value':>14} {'Capex':>14} {'NPV':>14} {'IRR':>7}")
     for row in result.table.itertuples():
@@ -255,7 +308,11 @@ def _run_sizing(args: argparse.Namespace) -> int:
 
 def _run_single_case(args: argparse.Namespace) -> int:
     config = load_config(args.config)
-    config = replace(config, grid_export_limit_mw=_effective_grid_limit(args, config))
+    config = replace(
+        config,
+        grid_export_limit_mw=_effective_grid_limit(args, config),
+        grid_charging=_effective_grid_charging(args, config),
+    )
     result = run_case(config, solver_override=args.solver)
     _write_outputs(config.output_dir, result.dispatch, result.kpis)
 
@@ -266,6 +323,9 @@ def _run_single_case(args: argparse.Namespace) -> int:
     print(f"Battery value:      €{result.kpis['battery_incremental_value_eur']:,.2f}")
     if config.grid_export_limit_mw is not None:
         print(f"Grid export limit:  {config.grid_export_limit_mw:g} MW")
+    _print_grid_charging(config.grid_charging, 20)
+    if config.grid_charging.enabled:
+        print(f"Grid import:        {result.kpis['total_grid_import_mwh']:,.1f} MWh")
     print(f"Solver status:      {result.kpis['solver_status']}")
     print(f"Results written to: {config.output_dir}")
     return 0
@@ -284,6 +344,7 @@ def _run_historical_backtest(args: argparse.Namespace) -> int:
     battery = Battery.from_config(config.battery)
     solver = args.solver or config.solver
     grid_limit = _effective_grid_limit(args, config)
+    grid_charging = _effective_grid_charging(args, config)
     output_dir = Path(args.output_dir) if args.output_dir else config.output_dir
 
     client = EnerginetClient()
@@ -293,7 +354,13 @@ def _run_historical_backtest(args: argparse.Namespace) -> int:
         price_area=args.area,
         wind_share=args.wind_share,
     )
-    result = run_daily_backtest(inputs, battery, solver=solver, grid_export_limit_mw=grid_limit)
+    result = run_daily_backtest(
+        inputs,
+        battery,
+        solver=solver,
+        grid_export_limit_mw=grid_limit,
+        grid_charging=grid_charging,
+    )
     _write_backtest_outputs(output_dir, inputs, result)
 
     print("Historical backtest")
@@ -302,6 +369,7 @@ def _run_historical_backtest(args: argparse.Namespace) -> int:
     print(f"Portfolio wind share:       {args.wind_share:.2%}")
     if grid_limit is not None:
         print(f"Grid export limit:          {grid_limit:g} MW")
+    _print_grid_charging(grid_charging, 28)
     print(f"Days replayed:              {result.summary['days']}")
     print(
         "Sell-all baseline:          "

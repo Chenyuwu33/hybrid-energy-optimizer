@@ -53,6 +53,29 @@ class BatteryConfig:
             raise ValueError("throughput_cost_eur_per_mwh must be non-negative")
 
 
+@dataclass(frozen=True)
+class GridChargingConfig:
+    """Whether and how the battery may buy electricity from the grid to charge.
+
+    Disabled by default: many wind support schemes forbid co-located storage from importing,
+    and import costs (tariffs, levies) erode arbitrage value. ``import_fee_eur_per_mwh`` is
+    added to the market price for every MWh imported; ``import_limit_mw`` caps hourly import
+    at the connection point (``None`` = unconstrained).
+    """
+
+    enabled: bool = False
+    import_limit_mw: float | None = None
+    import_fee_eur_per_mwh: float = 10.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("grid_charging.enabled must be true or false")
+        if self.import_limit_mw is not None and not self.import_limit_mw > 0:
+            raise ValueError("grid_charging.import_limit_mw must be positive or omitted")
+        if not self.import_fee_eur_per_mwh >= 0:
+            raise ValueError("grid_charging.import_fee_eur_per_mwh must be non-negative")
+
+
 def soc_percent_bounds(base: BatteryConfig) -> tuple[float, float]:
     """Return the allowed SOC range in percent implied by a battery's SOC bounds."""
     return (
@@ -119,6 +142,7 @@ class ProjectConfig:
     battery: BatteryConfig
     grid_export_limit_mw: float | None = None
     investment: InvestmentAssumptions = InvestmentAssumptions()
+    grid_charging: GridChargingConfig = GridChargingConfig()
 
     def __post_init__(self) -> None:
         if self.grid_export_limit_mw is not None and not self.grid_export_limit_mw > 0:
@@ -157,6 +181,12 @@ def load_config(path: str | Path) -> ProjectConfig:
     except TypeError as exc:
         raise ValueError(f"Invalid investment configuration: {exc}") from exc
 
+    grid_charging_raw = _require_mapping(root.get("grid_charging") or {}, "grid_charging")
+    try:
+        grid_charging = GridChargingConfig(**grid_charging_raw)
+    except TypeError as exc:
+        raise ValueError(f"Invalid grid_charging configuration: {exc}") from exc
+
     try:
         battery = BatteryConfig(**battery_raw)
         return ProjectConfig(
@@ -166,6 +196,7 @@ def load_config(path: str | Path) -> ProjectConfig:
             battery=battery,
             grid_export_limit_mw=grid_export_limit_mw,
             investment=investment,
+            grid_charging=grid_charging,
         )
     except KeyError as exc:
         raise ValueError(f"Missing configuration key: {exc.args[0]}") from exc

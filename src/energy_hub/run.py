@@ -24,11 +24,21 @@ def run_case(config: ProjectConfig, solver_override: str | None = None) -> RunRe
     inputs = load_hourly_inputs(config.input_csv)
     battery = Battery.from_config(config.battery)
     limit = config.grid_export_limit_mw
+    grid_charging = config.grid_charging
     result = optimize_dispatch(
         inputs,
         battery,
         solver=solver_override or config.solver,
         grid_export_limit_mw=limit,
+        grid_charging=grid_charging,
     )
-    kpis = calculate_kpis(inputs, result, battery, grid_export_limit_mw=limit)
+    kpis = calculate_kpis(
+        inputs,
+        result,
+        battery,
+        grid_export_limit_mw=limit,
+        grid_import_fee_eur_per_mwh=(
+            grid_charging.import_fee_eur_per_mwh if grid_charging.enabled else 0.0
+        ),
+    )
     return RunResult(dispatch=result.dispatch, kpis=kpis)

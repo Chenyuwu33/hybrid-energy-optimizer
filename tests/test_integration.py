@@ -151,3 +151,59 @@ def test_cli_size_requires_complete_historical_arguments(capsys) -> None:
 
     assert exit_code == 1
     assert "--start, --end and --wind-share together" in capsys.readouterr().err
+
+
+def test_cli_grid_charging_flags_override_config(tmp_path: Path, capsys) -> None:
+    config_raw = yaml.safe_load(Path("configs/base.yaml").read_text(encoding="utf-8"))
+    config_raw["input_csv"] = str(Path("data/sample/sample_24h.csv").resolve())
+    config_raw["grid_charging"]["enabled"] = True
+    config_path = tmp_path / "config.yaml"
+
+    def run(*extra: str) -> dict:
+        config_raw["output_dir"] = str(tmp_path / "out")
+        config_path.write_text(yaml.safe_dump(config_raw), encoding="utf-8")
+        assert main(["run", "--config", str(config_path), *extra]) == 0
+        return json.loads((tmp_path / "out" / "kpis.json").read_text(encoding="utf-8"))
+
+    on = run("--import-fee", "0")
+    assert "Grid charging:      on (import fee €0/MWh, limit unlimited)" in capsys.readouterr().out
+    assert on["total_grid_import_mwh"] > 0
+
+    off = run("--no-grid-charging")
+    assert "Grid charging" not in capsys.readouterr().out
+    assert off["total_grid_import_mwh"] == 0.0
+    assert on["optimized_revenue_eur"] >= off["optimized_revenue_eur"]
+
+    limited = run("--import-fee", "0", "--import-limit-mw", "2")
+    capsys.readouterr()
+    assert 0 < limited["total_grid_import_mwh"] <= 2.0 * 24 + 1e-6
+
+
+def test_cli_grid_charging_and_no_grid_charging_are_mutually_exclusive(capsys) -> None:
+    import pytest
+
+    with pytest.raises(SystemExit):
+        main(["run", "--config", "configs/base.yaml", "--grid-charging", "--no-grid-charging"])
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
+def test_cli_size_records_grid_charging_in_summary(tmp_path: Path, capsys) -> None:
+    exit_code = main(
+        [
+            "size",
+            "--config",
+            "configs/base.yaml",
+            "--powers",
+            "10",
+            "--durations",
+            "2",
+            "--grid-charging",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert "Grid charging:" in capsys.readouterr().out
+    summary = json.loads((tmp_path / "sizing_summary.json").read_text(encoding="utf-8"))
+    assert summary["grid_charging_enabled"] is True

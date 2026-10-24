@@ -10,7 +10,12 @@ import pandas as pd
 
 from energy_hub.assets.battery import Battery
 from energy_hub.backtesting.runner import BacktestResult, run_daily_backtest
-from energy_hub.config import BatteryConfig, resize_battery_config, soc_percent_bounds
+from energy_hub.config import (
+    BatteryConfig,
+    GridChargingConfig,
+    resize_battery_config,
+    soc_percent_bounds,
+)
 from energy_hub.data.energinet import EnerginetClient
 
 __all__ = [
@@ -49,6 +54,7 @@ class HistoricalBacktestRequest:
     terminal_soc_pct: float
     solver: str = "highs"
     grid_export_limit_mw: float | None = None
+    grid_charging: GridChargingConfig | None = None
 
     def __post_init__(self) -> None:
         if self.start >= self.end:
@@ -120,5 +126,6 @@ def run_historical_backtest(
         battery,
         solver=request.solver,
         grid_export_limit_mw=request.grid_export_limit_mw,
+        grid_charging=request.grid_charging,
     )
     return HistoricalBacktestBundle(inputs=inputs, result=result)

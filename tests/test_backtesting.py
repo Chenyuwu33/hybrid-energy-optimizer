@@ -82,3 +82,19 @@ def test_daily_backtest_applies_grid_limit_to_optimizer_and_baselines() -> None:
     expected_sell_all = float((first_day["price_eur_mwh"] * 40.0).sum())
     assert daily.loc[0, "baseline_sell_all_revenue_eur"] == pytest.approx(expected_sell_all)
     assert (daily["battery_incremental_vs_curtail_eur"] >= -1e-6).all()
+
+
+def test_daily_backtest_values_grid_arbitrage_on_windless_days() -> None:
+    from energy_hub.config import GridChargingConfig
+
+    inputs = _two_day_inputs().assign(wind_mwh=0.0)
+    charging = GridChargingConfig(enabled=True, import_fee_eur_per_mwh=5.0)
+
+    without = run_daily_backtest(inputs, _battery(), solver="highs")
+    with_grid = run_daily_backtest(inputs, _battery(), solver="highs", grid_charging=charging)
+
+    assert without.summary["battery_incremental_vs_curtail_eur"] == pytest.approx(0.0)
+    assert without.summary["grid_import_mwh"] == pytest.approx(0.0)
+    assert with_grid.summary["grid_import_mwh"] > 0
+    assert with_grid.summary["battery_incremental_vs_curtail_eur"] > 0
+    assert (with_grid.daily["grid_import_mwh"] > 0).all()

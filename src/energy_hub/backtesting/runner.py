@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from energy_hub.assets.battery import Battery
+from energy_hub.config import GridChargingConfig
 from energy_hub.economics.metrics import (
     calculate_baseline_revenue,
     calculate_curtail_negative_revenue,
@@ -53,6 +54,7 @@ def run_daily_backtest(
     battery: Battery,
     solver: str = "highs",
     grid_export_limit_mw: float | None = None,
+    grid_charging: GridChargingConfig | None = None,
 ) -> BacktestResult:
     """Replay complete UTC days using perfect-information day-ahead optimization.
 
@@ -62,6 +64,8 @@ def run_daily_backtest(
 
     ``grid_export_limit_mw`` applies the same connection limit to the optimizer and to both
     battery-less baselines, so the reported battery value is measured like-for-like.
+    ``grid_charging`` lets the battery buy from the grid; the optimized revenue is then net
+    of import costs, while the baselines (no battery) never import.
     """
     clean = _validate_hourly_days(inputs)
     daily_rows: list[dict[str, float | str]] = []
@@ -69,7 +73,11 @@ def run_daily_backtest(
     for day, group in clean.groupby("date", sort=True):
         hourly = group[["timestamp", "wind_mwh", "price_eur_mwh"]].reset_index(drop=True)
         dispatch_result = optimize_dispatch(
-            hourly, battery, solver=solver, grid_export_limit_mw=grid_export_limit_mw
+            hourly,
+            battery,
+            solver=solver,
+            grid_export_limit_mw=grid_export_limit_mw,
+            grid_charging=grid_charging,
         )
         dispatch = dispatch_result.dispatch
 
@@ -91,6 +99,7 @@ def run_daily_backtest(
                 "total_uplift_vs_sell_all_eur": optimized - sell_all,
                 "equivalent_full_cycles": throughput / (2.0 * battery.energy_capacity_mwh),
                 "ending_soc_mwh": float(dispatch["soc_mwh"].iloc[-1]),
+                "grid_import_mwh": float(dispatch["grid_import_mwh"].sum()),
             }
         )
 
@@ -111,5 +120,6 @@ def run_daily_backtest(
         ),
         "total_uplift_vs_sell_all_eur": float(daily["total_uplift_vs_sell_all_eur"].sum()),
         "equivalent_full_cycles": float(daily["equivalent_full_cycles"].sum()),
+        "grid_import_mwh": float(daily["grid_import_mwh"].sum()),
     }
     return BacktestResult(daily=daily, summary=summary)

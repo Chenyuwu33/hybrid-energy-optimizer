@@ -5,6 +5,15 @@ solver: highs
 # null = unconstrained connection. Example: 60.0
 grid_export_limit_mw: null
 
+# Let the battery buy from the grid to charge (price arbitrage). Off by default because many
+# wind support schemes forbid it. import_fee_eur_per_mwh is added to the market price of
+# every imported MWh: 10 EUR/MWh is roughly Energinet's 2026 system tariff (7.2 ore/kWh);
+# distribution-connected sites pay ~6 EUR/MWh more, and capacity charges and taxes are excluded.
+grid_charging:
+  enabled: false
+  import_limit_mw: null
+  import_fee_eur_per_mwh: 10.0
+
 battery:
   energy_capacity_mwh: 100.0
   charge_power_mw: 25.0

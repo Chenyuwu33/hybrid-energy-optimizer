@@ -210,3 +210,37 @@ def test_kpis_omit_grid_limit_keys_without_a_limit() -> None:
     kpis = calculate_kpis(inputs, result, _battery())
 
     assert "grid_export_limit_mw" not in kpis
+
+
+def test_kpis_deduct_grid_import_cost_including_fee() -> None:
+    inputs = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+            "wind_mwh": [0.0, 0.0],
+            "price_eur_mwh": [10.0, 100.0],
+        }
+    )
+    dispatch = pd.DataFrame(
+        {
+            "timestamp": inputs["timestamp"],
+            "wind_available_mwh": [0.0, 0.0],
+            "price_eur_mwh": [10.0, 100.0],
+            "wind_to_grid_mwh": [0.0, 0.0],
+            "battery_charge_mwh": [10.0, 0.0],
+            "battery_discharge_mwh": [0.0, 10.0],
+            "grid_export_mwh": [0.0, 10.0],
+            "curtailment_mwh": [0.0, 0.0],
+            "soc_mwh": [10.0, 0.0],
+            "battery_charge_from_wind_mwh": [0.0, 0.0],
+            "grid_import_mwh": [10.0, 0.0],
+        }
+    )
+    result = DispatchResult(dispatch=dispatch, objective_eur=850.0, solver_status="optimal")
+
+    kpis = calculate_kpis(inputs, result, _battery(), grid_import_fee_eur_per_mwh=5.0)
+
+    assert kpis["total_grid_import_mwh"] == pytest.approx(10.0)
+    assert kpis["grid_import_cost_eur"] == pytest.approx(10 * (10.0 + 5.0))
+    assert kpis["optimized_revenue_eur"] == pytest.approx(1000.0 - 150.0)
+    # No wind, so both battery-less baselines earn nothing: all value is arbitrage.
+    assert kpis["battery_incremental_value_eur"] == pytest.approx(850.0)

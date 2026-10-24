@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import requests
 import streamlit as st
+from grid_controls import grid_charging_inputs, grid_limit_input
 from historical_backtest import CachedEnerginetClient, default_period
 
 from energy_hub.backtesting.sizing import MAX_SWEEP_CASES, parse_number_list, run_sizing_sweep
@@ -52,8 +53,8 @@ def render_bess_sizing(base: ProjectConfig) -> None:
         "scaled from the backtest period to one year."
     )
     st.warning(
-        "Perfect-foresight backtest: annual values are an optimistic upper bound. The battery "
-        "charges from wind only (no grid arbitrage or ancillary services), and the default "
+        "Perfect-foresight backtest: annual values are an optimistic upper bound. "
+        "Ancillary-service revenue is not modelled, grid charging is optional, and the default "
         "costs are placeholders. Use project-specific quotes before drawing conclusions."
     )
     invest = base.investment
@@ -73,12 +74,7 @@ def render_bess_sizing(base: ProjectConfig) -> None:
         with d2:
             powers_text = st.text_input("Battery power options (MW)", value="10, 25, 50")
             durations_text = st.text_input("Duration options (hours)", value="1, 2, 4")
-            grid_limit_input = st.number_input(
-                "Grid export limit (MW)",
-                min_value=0.0,
-                value=float(base.grid_export_limit_mw or 0.0),
-                help="0 = unconstrained. Applies to the optimizer and the baseline alike.",
-            )
+            grid_limit = grid_limit_input(base)
         with d3:
             energy_capex = st.number_input(
                 "Energy capex (€/MWh)",
@@ -123,6 +119,9 @@ def render_bess_sizing(base: ProjectConfig) -> None:
                     help="Yearly decline of battery value from capacity fade and cannibalisation.",
                 )
 
+        with st.expander("Grid charging (arbitrage)"):
+            grid_charging = grid_charging_inputs(base, "sizing")
+
         submitted = st.form_submit_button("Run sizing sweep", type="primary")
 
     if not submitted:
@@ -143,7 +142,6 @@ def render_bess_sizing(base: ProjectConfig) -> None:
             discount_rate=float(discount_pct) / 100.0,
             annual_revenue_degradation=float(degradation_pct) / 100.0,
         )
-        grid_limit = float(grid_limit_input) if grid_limit_input > 0 else None
         if source == _SAMPLE:
             inputs = load_hourly_inputs(base.input_csv)
         else:
@@ -161,6 +159,7 @@ def render_bess_sizing(base: ProjectConfig) -> None:
                 assumptions,
                 solver=solver,
                 grid_export_limit_mw=grid_limit,
+                grid_charging=grid_charging,
             )
     except (ValueError, RuntimeError, OSError, requests.RequestException) as exc:
         st.error(str(exc))
