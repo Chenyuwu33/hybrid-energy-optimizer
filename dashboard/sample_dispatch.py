@@ -103,9 +103,9 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
     c5.metric("Equivalent cycles", f"{kpis['equivalent_full_cycles']:.2f}")
 
     dispatch = result.dispatch
-    st.plotly_chart(sample_input_figure(dispatch), use_container_width=True)
-    st.plotly_chart(sample_dispatch_figure(dispatch), use_container_width=True)
-    st.plotly_chart(sample_soc_figure(dispatch), use_container_width=True)
+    st.plotly_chart(sample_input_figure(dispatch), width="stretch")
+    st.plotly_chart(sample_dispatch_figure(dispatch), width="stretch")
+    st.plotly_chart(sample_soc_figure(dispatch), width="stretch")
 
     charging = dispatch.loc[dispatch["battery_charge_mwh"] > 1e-6]
     discharging = dispatch.loc[dispatch["battery_discharge_mwh"] > 1e-6]
@@ -118,4 +118,4 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
             f"discharging price €{avg_discharge_price:.1f}/MWh."
         )
 
-    st.dataframe(dispatch, use_container_width=True, hide_index=True)
+    st.dataframe(dispatch, width="stretch", hide_index=True)

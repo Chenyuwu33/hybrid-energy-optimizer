@@ -354,7 +354,26 @@ docker run --rm hybrid-energy-optimizer:0.2.1 \
   energy-hub run --config configs/base.yaml --solver highs
 ```
 
+Run the dashboard in Docker:
+
+```bash
+docker run --rm -p 8501:8501 hybrid-energy-optimizer:0.2.1 \
+  streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501
+```
+
+Then open <http://localhost:8501>.
+
 A live Energinet backtest requires network access from the container.
+
+## Deploy to Streamlit Community Cloud
+
+1. Push the repository to GitHub and sign in at <https://share.streamlit.io> with the same account.
+2. Choose **Create app → Deploy a public app from GitHub** and select this repository and branch.
+3. Set **Main file path** to `dashboard/app.py`.
+4. Under **Advanced settings**, choose **Python 3.11** or newer.
+5. Deploy. Streamlit installs `requirements.txt`, which installs this package (`-e .`), so all runtime dependencies come from `pyproject.toml`.
+
+No secrets are required: the Energinet Energi Data Service API is public. Fetched historical inputs are cached per scenario for six hours, so changing only battery assumptions does not call the API again. The dashboard resolves its config and sample data relative to the repository, so it works regardless of the directory the app is started from.
 
 ## Roadmap
 
@@ -371,7 +390,7 @@ Next priorities:
 1. Add battery degradation economics and BESS sizing sensitivity
 2. Add a grid-connection export limit
 3. Add hourly historical dispatch export and deeper diagnostic views
-4. Persist/cache normalized market data
+4. Persist normalized market data across sessions (in-session caching is in place)
 5. Add wind- and price-forecast models and quantify forecast economic value
 6. Add rolling-horizon optimization under forecast error
 7. Add day-ahead / intraday / balancing-market extensions
