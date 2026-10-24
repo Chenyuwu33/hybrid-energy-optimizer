@@ -29,8 +29,13 @@ def optimize_dispatch(
     inputs: pd.DataFrame,
     battery: Battery,
     solver: str = "highs",
+    grid_export_limit_mw: float | None = None,
 ) -> DispatchResult:
     """Optimize hourly dispatch using HiGHS by default or optional Gurobi.
+
+    ``grid_export_limit_mw`` caps hourly grid export (wind to grid plus battery discharge) at
+    the point of connection. ``None`` means an unconstrained connection. Wind above the limit
+    must be stored or curtailed, which is where co-located storage typically earns most.
 
     When Pyomo is installed, the requested solver is used through Pyomo. For the
     open-source ``highs`` option, a SciPy/HiGHS compatibility backend is used when
@@ -42,22 +47,35 @@ def optimize_dispatch(
         raise RuntimeError(f"Requested solver '{solver}' is not supported or unavailable")
     if inputs.empty:
         raise ValueError("cannot optimize an empty input horizon")
+    limit = validate_grid_export_limit(grid_export_limit_mw)
 
     if requested == "gurobi":
         try:
-            return _solve_with_pyomo(inputs, battery, requested)
+            return _solve_with_pyomo(inputs, battery, requested, limit)
         except ImportError as exc:
             raise RuntimeError(
                 "Requested solver 'gurobi' is unavailable: install Pyomo and gurobipy"
             ) from exc
 
     try:
-        return _solve_with_pyomo(inputs, battery, requested)
+        return _solve_with_pyomo(inputs, battery, requested, limit)
     except (ImportError, RuntimeError):
-        return _solve_with_scipy_highs(inputs, battery)
+        return _solve_with_scipy_highs(inputs, battery, limit)
 
 
-def _solve_with_scipy_highs(inputs: pd.DataFrame, battery: Battery) -> DispatchResult:
+def validate_grid_export_limit(value: float | None) -> float | None:
+    """Return a validated grid export limit in MW, or ``None`` for no limit."""
+    if value is None:
+        return None
+    limit = float(value)
+    if not np.isfinite(limit) or limit <= 0:
+        raise ValueError("grid_export_limit_mw must be a positive number or omitted")
+    return limit
+
+
+def _solve_with_scipy_highs(
+    inputs: pd.DataFrame, battery: Battery, grid_export_limit_mw: float | None = None
+) -> DispatchResult:
     try:
         from scipy.optimize import linprog
     except ImportError as exc:
@@ -104,6 +122,16 @@ def _solve_with_scipy_highs(inputs: pd.DataFrame, battery: Battery) -> DispatchR
         a_eq.append(transition)
         b_eq.append(float(b))
 
+    a_ub: np.ndarray | None = None
+    b_ub: np.ndarray | None = None
+    if grid_export_limit_mw is not None:
+        # Hourly steps: MW limit equals the MWh that may be exported per step.
+        a_ub = np.zeros((n, size), dtype=float)
+        for t in range(n):
+            a_ub[t, t] = 1.0
+            a_ub[t, 2 * n + t] = 1.0
+        b_ub = np.full(n, grid_export_limit_mw, dtype=float)
+
     bounds: list[tuple[float | None, float | None]] = []
     bounds.extend([(0.0, None)] * n)
     bounds.extend([(0.0, battery.charge_power_mw)] * n)
@@ -115,6 +143,8 @@ def _solve_with_scipy_highs(inputs: pd.DataFrame, battery: Battery) -> DispatchR
 
     solved = linprog(
         objective,
+        A_ub=a_ub,
+        b_ub=b_ub,
         A_eq=np.vstack(a_eq),
         b_eq=np.asarray(b_eq),
         bounds=bounds,
@@ -152,7 +182,12 @@ def _solve_with_scipy_highs(inputs: pd.DataFrame, battery: Battery) -> DispatchR
     )
 
 
-def _solve_with_pyomo(inputs: pd.DataFrame, battery: Battery, solver: str) -> DispatchResult:
+def _solve_with_pyomo(
+    inputs: pd.DataFrame,
+    battery: Battery,
+    solver: str,
+    grid_export_limit_mw: float | None = None,
+) -> DispatchResult:
     try:
         import pyomo.environ as pyo
         from pyomo.opt import SolverStatus, TerminationCondition
@@ -197,6 +232,13 @@ def _solve_with_pyomo(inputs: pd.DataFrame, battery: Battery, solver: str) -> Di
         )
 
     model.soc_transition = pyo.Constraint(model.T, rule=soc_transition)
+
+    if grid_export_limit_mw is not None:
+
+        def grid_export_limit(m: object, t: int) -> object:
+            return m.wind_to_grid[t] + m.discharge[t] <= grid_export_limit_mw
+
+        model.grid_export_limit = pyo.Constraint(model.T, rule=grid_export_limit)
     if battery.terminal_soc_mwh is not None:
         model.terminal_soc = pyo.Constraint(
             expr=model.soc[n - 1] == battery.terminal_soc_mwh

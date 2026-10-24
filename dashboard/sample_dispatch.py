@@ -63,6 +63,15 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
                 value=_base_pct(base_battery.terminal_soc_mwh),
                 help=soc_help,
             )
+            grid_limit_input = st.number_input(
+                "Grid export limit (MW)",
+                min_value=0.0,
+                value=float(base.grid_export_limit_mw or 0.0),
+                help=(
+                    "Maximum export at the connection point "
+                    "(wind to grid + battery discharge). 0 = unconstrained."
+                ),
+            )
             solver = st.selectbox("Solver", ["highs", "gurobi"], index=0)
 
         submitted = st.form_submit_button("Run sample optimization", type="primary")
@@ -80,7 +89,8 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
             initial_soc_pct=float(initial_soc_pct),
             terminal_soc_pct=float(terminal_soc_pct),
         )
-        config = replace(base, battery=battery)
+        grid_limit = float(grid_limit_input) if grid_limit_input > 0 else None
+        config = replace(base, battery=battery, grid_export_limit_mw=grid_limit)
         result = run_case(config, solver_override=solver)
     except (ValueError, RuntimeError) as exc:
         st.error(str(exc))
@@ -101,10 +111,17 @@ def render_sample_dispatch(base: ProjectConfig) -> None:
         help="Optimized revenue minus a wind-only baseline that curtails at negative prices.",
     )
     c5.metric("Equivalent cycles", f"{kpis['equivalent_full_cycles']:.2f}")
+    if grid_limit is not None:
+        st.caption(
+            f"Grid export limit {grid_limit:g} MW was binding in "
+            f"{kpis['grid_limit_binding_hours']:.0f} of {len(result.dispatch)} hours; "
+            f"{kpis['wind_above_grid_limit_mwh']:,.0f} MWh of wind exceeded the limit. "
+            "Both baselines curtail that excess, since they have no battery."
+        )
 
     dispatch = result.dispatch
     st.plotly_chart(sample_input_figure(dispatch), width="stretch")
-    st.plotly_chart(sample_dispatch_figure(dispatch), width="stretch")
+    st.plotly_chart(sample_dispatch_figure(dispatch, grid_limit), width="stretch")
     st.plotly_chart(sample_soc_figure(dispatch), width="stretch")
 
     charging = dispatch.loc[dispatch["battery_charge_mwh"] > 1e-6]

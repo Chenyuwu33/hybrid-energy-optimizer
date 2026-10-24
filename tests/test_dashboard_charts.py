@@ -77,3 +77,21 @@ def test_historical_chart_helpers_expose_wind_price_value_revenue_and_cycles() -
     assert [trace.name for trace in daily_cycles_figure(daily).data] == [
         "Equivalent full cycles"
     ]
+
+
+def test_dispatch_and_wind_charts_draw_grid_limit_only_when_set() -> None:
+    inputs = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-09-01", periods=2, freq="h"),
+            "wind_mwh": [30.0, 80.0],
+            "price_eur_mwh": [20.0, 100.0],
+        }
+    )
+
+    assert len(sample_dispatch_figure(_dispatch()).layout.shapes) == 0
+    limited = sample_dispatch_figure(_dispatch(), grid_export_limit_mw=55.0)
+    assert [shape.y0 for shape in limited.layout.shapes] == [55.0]
+
+    assert len(historical_wind_price_figure(inputs).layout.shapes) == 0
+    limited_wind = historical_wind_price_figure(inputs, grid_export_limit_mw=55.0)
+    assert [shape.y0 for shape in limited_wind.layout.shapes] == [55.0]

@@ -48,6 +48,7 @@ class HistoricalBacktestRequest:
     initial_soc_pct: float
     terminal_soc_pct: float
     solver: str = "highs"
+    grid_export_limit_mw: float | None = None
 
     def __post_init__(self) -> None:
         if self.start >= self.end:
@@ -70,6 +71,8 @@ class HistoricalBacktestRequest:
                 raise ValueError(f"{name} percentage must be between 0 and 100")
         if self.solver not in {"highs", "gurobi"}:
             raise ValueError("solver must be 'highs' or 'gurobi'")
+        if self.grid_export_limit_mw is not None and not self.grid_export_limit_mw > 0:
+            raise ValueError("grid export limit must be positive or omitted")
 
 
 @dataclass(frozen=True)
@@ -112,5 +115,10 @@ def run_historical_backtest(
         price_area=request.area,
         wind_capacity_mw=request.wind_capacity_mw,
     )
-    result = run_daily_backtest(inputs, battery, solver=request.solver)
+    result = run_daily_backtest(
+        inputs,
+        battery,
+        solver=request.solver,
+        grid_export_limit_mw=request.grid_export_limit_mw,
+    )
     return HistoricalBacktestBundle(inputs=inputs, result=result)

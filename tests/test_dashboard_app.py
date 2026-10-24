@@ -26,3 +26,17 @@ def test_dashboard_app_runs_from_any_working_directory(tmp_path, monkeypatch) ->
     app.button[0].click().run()
     assert not app.exception
     assert not app.error
+
+
+def test_sample_tab_applies_grid_export_limit() -> None:
+    app_path = Path(__file__).resolve().parents[1] / "dashboard" / "app.py"
+    app = AppTest.from_file(app_path, default_timeout=20).run()
+
+    grid_inputs = [w for w in app.number_input if w.label == "Grid export limit (MW)"]
+    assert len(grid_inputs) == 2  # one per tab
+    grid_inputs[0].set_value(50.0)
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert not app.error
+    assert any("Grid export limit 50 MW was binding" in c.value for c in app.caption)

@@ -23,6 +23,12 @@ def run_case(config: ProjectConfig, solver_override: str | None = None) -> RunRe
     """Run one configured decision-support case without writing output files."""
     inputs = load_hourly_inputs(config.input_csv)
     battery = Battery.from_config(config.battery)
-    result = optimize_dispatch(inputs, battery, solver=solver_override or config.solver)
-    kpis = calculate_kpis(inputs, result, battery)
+    limit = config.grid_export_limit_mw
+    result = optimize_dispatch(
+        inputs,
+        battery,
+        solver=solver_override or config.solver,
+        grid_export_limit_mw=limit,
+    )
+    kpis = calculate_kpis(inputs, result, battery, grid_export_limit_mw=limit)
     return RunResult(dispatch=result.dispatch, kpis=kpis)

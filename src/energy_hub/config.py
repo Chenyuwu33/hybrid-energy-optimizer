@@ -115,6 +115,11 @@ class ProjectConfig:
     output_dir: Path
     solver: str
     battery: BatteryConfig
+    grid_export_limit_mw: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.grid_export_limit_mw is not None and not self.grid_export_limit_mw > 0:
+            raise ValueError("grid_export_limit_mw must be positive or omitted")
 
 
 def _require_mapping(value: Any, name: str) -> dict[str, Any]:
@@ -136,6 +141,12 @@ def load_config(path: str | Path) -> ProjectConfig:
     root = _require_mapping(raw, "configuration")
     battery_raw = _require_mapping(root.get("battery"), "battery")
 
+    raw_limit = root.get("grid_export_limit_mw")
+    try:
+        grid_export_limit_mw = None if raw_limit is None else float(raw_limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("grid_export_limit_mw must be a number or null") from exc
+
     try:
         battery = BatteryConfig(**battery_raw)
         return ProjectConfig(
@@ -143,6 +154,7 @@ def load_config(path: str | Path) -> ProjectConfig:
             output_dir=Path(root.get("output_dir", "outputs")),
             solver=str(root.get("solver", "highs")),
             battery=battery,
+            grid_export_limit_mw=grid_export_limit_mw,
         )
     except KeyError as exc:
         raise ValueError(f"Missing configuration key: {exc.args[0]}") from exc

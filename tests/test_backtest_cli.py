@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import energy_hub.cli as cli
 
@@ -101,3 +102,36 @@ def test_backtest_command_rejects_nonpositive_wind_share(tmp_path: Path, capsys)
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "wind-share" in captured.err.lower()
+
+
+def test_backtest_command_applies_grid_limit_to_baselines(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    fake = FakeEnerginetClient()
+    monkeypatch.setattr(cli, "EnerginetClient", lambda: fake, raising=False)
+    args = [
+        "backtest",
+        "--config",
+        "configs/base.yaml",
+        "--start",
+        "2026-01-01",
+        "--end",
+        "2026-01-03",
+        "--wind-share",
+        "0.05",
+        "--solver",
+        "highs",
+    ]
+
+    assert cli.main([*args, "--output-dir", str(tmp_path / "open")]) == 0
+    limited_args = [*args, "--output-dir", str(tmp_path / "limited"), "--grid-limit-mw", "30"]
+    assert cli.main(limited_args) == 0
+
+    assert "Grid export limit:          30 MW" in capsys.readouterr().out
+    open_summary = json.loads((tmp_path / "open" / "backtest_summary.json").read_text())
+    limited = json.loads((tmp_path / "limited" / "backtest_summary.json").read_text())
+    # Wind is 50 MWh/h; behind a 30 MW connection the sell-all baseline exports only 30.
+    assert limited["baseline_sell_all_revenue_eur"] == pytest.approx(
+        open_summary["baseline_sell_all_revenue_eur"] * 30.0 / 50.0
+    )
+    assert limited["optimized_revenue_eur"] >= limited["baseline_curtail_negative_revenue_eur"]

@@ -74,3 +74,29 @@ def test_resize_battery_config_reports_soc_outside_operating_range_in_percent() 
             initial_soc_pct=5.0,
             terminal_soc_pct=50.0,
         )
+
+
+def test_base_config_has_no_grid_export_limit_by_default() -> None:
+    assert load_config("configs/base.yaml").grid_export_limit_mw is None
+
+
+def test_grid_export_limit_is_loaded_and_validated(tmp_path: Path) -> None:
+    base_text = Path("configs/base.yaml").read_text(encoding="utf-8")
+
+    valid = tmp_path / "valid.yaml"
+    valid.write_text(
+        base_text.replace("grid_export_limit_mw: null", "grid_export_limit_mw: 60"),
+        encoding="utf-8",
+    )
+    assert load_config(valid).grid_export_limit_mw == pytest.approx(60.0)
+
+    for bad_value in ("0", "-10", "fast"):
+        invalid = tmp_path / f"invalid_{bad_value}.yaml"
+        invalid.write_text(
+            base_text.replace(
+                "grid_export_limit_mw: null", f"grid_export_limit_mw: {bad_value}"
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="grid_export_limit_mw"):
+            load_config(invalid)

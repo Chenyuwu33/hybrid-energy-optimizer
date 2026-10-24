@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -32,6 +33,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Override the solver specified in the YAML configuration",
     )
+    _add_grid_limit_argument(run_parser)
 
     backtest_parser = subparsers.add_parser(
         "backtest",
@@ -63,7 +65,26 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Output directory; defaults to output_dir from the YAML configuration",
     )
+    _add_grid_limit_argument(backtest_parser)
     return parser
+
+
+def _add_grid_limit_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--grid-limit-mw",
+        type=float,
+        default=None,
+        help="Override grid_export_limit_mw from the YAML configuration (MW at the "
+        "connection point; applies to the optimizer and the baselines)",
+    )
+
+
+def _effective_grid_limit(args: argparse.Namespace, config) -> float | None:
+    if args.grid_limit_mw is None:
+        return config.grid_export_limit_mw
+    if not args.grid_limit_mw > 0:
+        raise ValueError("--grid-limit-mw must be positive")
+    return float(args.grid_limit_mw)
 
 
 def _write_outputs(output_dir: Path, dispatch, kpis: dict[str, float | str]) -> None:
@@ -91,6 +112,7 @@ def _write_backtest_outputs(
 
 def _run_single_case(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    config = replace(config, grid_export_limit_mw=_effective_grid_limit(args, config))
     result = run_case(config, solver_override=args.solver)
     _write_outputs(config.output_dir, result.dispatch, result.kpis)
 
@@ -99,6 +121,8 @@ def _run_single_case(args: argparse.Namespace) -> int:
     print(f"Optimized revenue: €{result.kpis['optimized_revenue_eur']:,.2f}")
     print(f"Revenue uplift:     €{result.kpis['revenue_uplift_eur']:,.2f}")
     print(f"Battery value:      €{result.kpis['battery_incremental_value_eur']:,.2f}")
+    if config.grid_export_limit_mw is not None:
+        print(f"Grid export limit:  {config.grid_export_limit_mw:g} MW")
     print(f"Solver status:      {result.kpis['solver_status']}")
     print(f"Results written to: {config.output_dir}")
     return 0
@@ -116,6 +140,7 @@ def _run_historical_backtest(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     battery = Battery.from_config(config.battery)
     solver = args.solver or config.solver
+    grid_limit = _effective_grid_limit(args, config)
     output_dir = Path(args.output_dir) if args.output_dir else config.output_dir
 
     client = EnerginetClient()
@@ -125,13 +150,15 @@ def _run_historical_backtest(args: argparse.Namespace) -> int:
         price_area=args.area,
         wind_share=args.wind_share,
     )
-    result = run_daily_backtest(inputs, battery, solver=solver)
+    result = run_daily_backtest(inputs, battery, solver=solver, grid_export_limit_mw=grid_limit)
     _write_backtest_outputs(output_dir, inputs, result)
 
     print("Historical backtest")
     print(f"Area:                       {args.area}")
     print(f"Period:                     {start.isoformat()} to {end.isoformat()} (end exclusive)")
     print(f"Portfolio wind share:       {args.wind_share:.2%}")
+    if grid_limit is not None:
+        print(f"Grid export limit:          {grid_limit:g} MW")
     print(f"Days replayed:              {result.summary['days']}")
     print(
         "Sell-all baseline:          "
