@@ -7,6 +7,7 @@ from datetime import date, timedelta
 import pandas as pd
 import requests
 import streamlit as st
+from degradation_controls import degradation_inputs
 from grid_controls import grid_charging_inputs, grid_limit_input
 
 from energy_hub.backtesting.service import (
@@ -68,7 +69,8 @@ def _methodology_note() -> None:
         "prices and wind are realized values, so this is a perfect-information benchmark, "
         "not realized trading PnL or investment advice. An optional grid export limit applies to "
         "the optimizer and both baselines alike; optional grid charging pays the market price "
-        "plus an import fee. Battery degradation is not yet included."
+        "plus an import fee; optional degradation prices each MWh cycled at its share of cell "
+        "replacement cost."
     )
 
 
@@ -126,6 +128,8 @@ def render_historical_backtest(base: ProjectConfig) -> None:
 
         with st.expander("Grid charging (arbitrage)"):
             grid_charging = grid_charging_inputs(base, "historical")
+        with st.expander("Battery degradation"):
+            degradation = degradation_inputs(base, "historical")
 
         submitted = st.form_submit_button("Run historical backtest", type="primary")
 
@@ -147,6 +151,7 @@ def render_historical_backtest(base: ProjectConfig) -> None:
             solver=solver,
             grid_export_limit_mw=grid_limit,
             grid_charging=grid_charging,
+            degradation=degradation,
         )
         bundle = run_historical_backtest(
             request, base.battery, client=CachedEnerginetClient()
@@ -178,6 +183,12 @@ def render_historical_backtest(base: ProjectConfig) -> None:
         f"€{summary['total_uplift_vs_sell_all_eur']:,.0f}",
     )
     bottom[3].metric("Equivalent full cycles", f"{summary['equivalent_full_cycles']:.2f}")
+    if degradation.enabled:
+        st.caption(
+            f"Battery degradation cost €{summary['degradation_cost_eur']:,.0f} at "
+            f"€{degradation.cost_eur_per_mwh_throughput:.2f}/MWh throughput, already deducted "
+            "from the optimized revenue and the battery value."
+        )
     if grid_charging.enabled:
         st.caption(
             f"Grid charging bought {summary['grid_import_mwh']:,.0f} MWh "

@@ -207,3 +207,50 @@ def test_cli_size_records_grid_charging_in_summary(tmp_path: Path, capsys) -> No
     assert "Grid charging:" in capsys.readouterr().out
     summary = json.loads((tmp_path / "sizing_summary.json").read_text(encoding="utf-8"))
     assert summary["grid_charging_enabled"] is True
+
+
+def test_cli_degradation_flags(tmp_path: Path, capsys) -> None:
+    config_raw = yaml.safe_load(Path("configs/base.yaml").read_text(encoding="utf-8"))
+    config_raw["input_csv"] = str(Path("data/sample/sample_24h.csv").resolve())
+    config_raw["output_dir"] = str(tmp_path / "out")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config_raw), encoding="utf-8")
+    kpi_path = tmp_path / "out" / "kpis.json"
+
+    assert main(["run", "--config", str(config_path)]) == 0
+    out = capsys.readouterr().out
+    assert "Degradation:        on (€5.00/MWh throughput, cycle life 7,500)" in out
+    worn = json.loads(kpi_path.read_text(encoding="utf-8"))
+
+    assert main(["run", "--config", str(config_path), "--no-degradation"]) == 0
+    assert "Degradation" not in capsys.readouterr().out
+    fresh = json.loads(kpi_path.read_text(encoding="utf-8"))
+
+    assert worn["degradation_cost_eur"] > 0
+    assert fresh["degradation_cost_eur"] == 0.0
+    assert worn["battery_incremental_value_eur"] < fresh["battery_incremental_value_eur"]
+
+    assert main(["run", "--config", str(config_path), "--cycle-life", "3750"]) == 0
+    assert "€10.00/MWh throughput" in capsys.readouterr().out
+
+
+def test_cli_size_shows_cycle_life_years(tmp_path: Path, capsys) -> None:
+    assert (
+        main(
+            [
+                "size",
+                "--config",
+                "configs/base.yaml",
+                "--powers",
+                "10",
+                "--durations",
+                "2",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    assert "Life (yr)" in capsys.readouterr().out
+    summary = json.loads((tmp_path / "sizing_summary.json").read_text(encoding="utf-8"))
+    assert summary["degradation"]["cycle_life_full_cycles"] == 7500.0

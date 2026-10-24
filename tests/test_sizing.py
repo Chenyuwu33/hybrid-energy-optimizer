@@ -93,3 +93,21 @@ def test_parse_number_list_sorts_deduplicates_and_validates() -> None:
         parse_number_list("10, abc", "powers")
     with pytest.raises(ValueError, match="at least one"):
         parse_number_list(" , ", "powers")
+
+
+def test_sweep_reports_degradation_cost_and_cycle_life_years() -> None:
+    from energy_hub.config import DegradationConfig
+
+    base = load_config("configs/base.yaml").battery
+    degradation = DegradationConfig(enabled=True, cycle_life_full_cycles=5_000.0)
+
+    with_wear = run_sizing_sweep(_two_day_inputs(), base, [10], [2], degradation=degradation)
+    without = run_sizing_sweep(_two_day_inputs(), base, [10], [2])
+
+    row = with_wear.table.iloc[0]
+    assert row["cycle_life_years"] == pytest.approx(5_000.0 / row["annual_equivalent_full_cycles"])
+    assert row["annual_degradation_cost_eur"] > 0
+    assert row["annual_battery_value_eur"] < without.table.iloc[0]["annual_battery_value_eur"]
+    assert pd.isna(without.table.iloc[0]["cycle_life_years"])
+    assert with_wear.degradation == degradation
+    assert without.degradation is None

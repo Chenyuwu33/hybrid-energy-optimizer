@@ -229,3 +229,24 @@ def test_dispatch_reports_wind_and_grid_charging_separately() -> None:
         + dispatch["battery_charge_from_wind_mwh"]
         + dispatch["curtailment_mwh"]
     ).to_numpy() == pytest.approx(dispatch["wind_available_mwh"].to_numpy())
+
+
+def test_degradation_cost_blocks_trades_whose_spread_does_not_pay_for_wear() -> None:
+    from dataclasses import replace
+
+    # Shifting 1 MWh costs 2 MWh of throughput: at 5 EUR/MWh that is 10 EUR per MWh shifted.
+    worn = replace(_battery(), degradation_cost_eur_per_mwh=5.0)
+
+    small_spread = _inputs([50.0, 58.0], wind=[10.0, 0.0])
+    assert optimize_dispatch(small_spread, _battery()).dispatch[
+        "battery_discharge_mwh"
+    ].sum() == pytest.approx(10.0)
+    blocked = optimize_dispatch(small_spread, worn)
+    assert blocked.dispatch["battery_discharge_mwh"].sum() == pytest.approx(0.0)
+    assert blocked.objective_eur == pytest.approx(10 * 50.0)
+
+    large_spread = _inputs([50.0, 70.0], wind=[10.0, 0.0])
+    traded = optimize_dispatch(large_spread, worn)
+    assert traded.dispatch["battery_discharge_mwh"].sum() == pytest.approx(10.0)
+    # Revenue 10 x 70 minus 20 MWh throughput x 5 EUR/MWh degradation.
+    assert traded.objective_eur == pytest.approx(10 * 70.0 - 20 * 5.0)

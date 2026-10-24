@@ -12,6 +12,7 @@ from energy_hub.assets.battery import Battery
 from energy_hub.backtesting.runner import BacktestResult, run_daily_backtest
 from energy_hub.config import (
     BatteryConfig,
+    DegradationConfig,
     GridChargingConfig,
     resize_battery_config,
     soc_percent_bounds,
@@ -55,6 +56,7 @@ class HistoricalBacktestRequest:
     solver: str = "highs"
     grid_export_limit_mw: float | None = None
     grid_charging: GridChargingConfig | None = None
+    degradation: DegradationConfig | None = None
 
     def __post_init__(self) -> None:
         if self.start >= self.end:
@@ -102,7 +104,8 @@ def build_battery_from_request(
             discharge_power_mw=request.discharge_power_mw,
             initial_soc_pct=request.initial_soc_pct,
             terminal_soc_pct=request.terminal_soc_pct,
-        )
+        ),
+        request.degradation,
     )
 
 

@@ -22,7 +22,7 @@ class RunResult:
 def run_case(config: ProjectConfig, solver_override: str | None = None) -> RunResult:
     """Run one configured decision-support case without writing output files."""
     inputs = load_hourly_inputs(config.input_csv)
-    battery = Battery.from_config(config.battery)
+    battery = Battery.from_config(config.battery, config.degradation)
     limit = config.grid_export_limit_mw
     grid_charging = config.grid_charging
     result = optimize_dispatch(
@@ -39,6 +39,9 @@ def run_case(config: ProjectConfig, solver_override: str | None = None) -> RunRe
         grid_export_limit_mw=limit,
         grid_import_fee_eur_per_mwh=(
             grid_charging.import_fee_eur_per_mwh if grid_charging.enabled else 0.0
+        ),
+        cycle_life_full_cycles=(
+            config.degradation.cycle_life_full_cycles if config.degradation.enabled else None
         ),
     )
     return RunResult(dispatch=result.dispatch, kpis=kpis)

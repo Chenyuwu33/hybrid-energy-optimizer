@@ -155,3 +155,29 @@ def test_grid_charging_section_loads_and_validates(tmp_path: Path) -> None:
         bad.write_text(text.replace(old, new), encoding="utf-8")
         with pytest.raises(ValueError, match=match):
             load_config(bad)
+
+
+def test_degradation_cost_per_mwh_and_validation(tmp_path: Path) -> None:
+    from energy_hub.config import DegradationConfig
+
+    model = DegradationConfig(
+        enabled=True, cell_replacement_cost_eur_per_mwh=60_000.0, cycle_life_full_cycles=6_000.0
+    )
+    assert model.cost_eur_per_mwh_throughput == pytest.approx(60_000 / 12_000)
+    assert DegradationConfig().cost_eur_per_mwh_throughput == 0.0  # disabled by default
+
+    base = load_config("configs/base.yaml").degradation
+    assert base.enabled is True
+    assert base.cost_eur_per_mwh_throughput == pytest.approx(5.0)
+
+    text = Path("configs/base.yaml").read_text(encoding="utf-8")
+    replacement_key = "cell_replacement_cost_eur_per_mwh"
+    for old, new, match in [
+        ("cycle_life_full_cycles: 7500.0", "cycle_life_full_cycles: 0", "cycle_life"),
+        (f"{replacement_key}: 75000.0", f"{replacement_key}: -1", "replacement"),
+        ("calendar_life_years: 20.0", "calendar_life_years: 20.0\n  typo: 1", "Invalid degrad"),
+    ]:
+        bad = tmp_path / "bad.yaml"
+        bad.write_text(text.replace(old, new), encoding="utf-8")
+        with pytest.raises(ValueError, match=match):
+            load_config(bad)

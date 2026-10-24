@@ -130,7 +130,7 @@ def _solve_with_scipy_highs(
     wg, cw, dis, cur, soc, gi = (slice(k * n, (k + 1) * n) for k in range(6))
     size = 6 * n
 
-    cycling_cost = battery.throughput_cost_eur_per_mwh + _THROUGHPUT_TIE_BREAK_EUR_PER_MWH
+    cycling_cost = battery.cycling_cost_eur_per_mwh + _THROUGHPUT_TIE_BREAK_EUR_PER_MWH
     objective = np.zeros(size, dtype=float)  # linprog minimizes, so revenues are negative
     objective[wg] = -price
     objective[cw] = cycling_cost
@@ -288,7 +288,7 @@ def _solve_with_pyomo(
             expr=model.soc[n - 1] == battery.terminal_soc_mwh
         )
 
-    cycling_cost = battery.throughput_cost_eur_per_mwh + _THROUGHPUT_TIE_BREAK_EUR_PER_MWH
+    cycling_cost = battery.cycling_cost_eur_per_mwh + _THROUGHPUT_TIE_BREAK_EUR_PER_MWH
     model.objective = pyo.Objective(
         expr=sum(
             price[t] * (model.wind_to_grid[t] + model.discharge[t])
@@ -365,11 +365,12 @@ def _build_result(
         columns=_COLUMNS,
     )
     throughput = float(charging.sum() + discharging.sum())
-    # Market revenue net of import cost and throughput cost; the solver tie-break is excluded.
+    # Market revenue net of import, throughput and degradation cost; the solver tie-break
+    # is excluded.
     objective = float(
         np.dot(price, export)
         - np.dot(price + grid_import.fee_eur_per_mwh, imported)
-        - battery.throughput_cost_eur_per_mwh * throughput
+        - battery.cycling_cost_eur_per_mwh * throughput
     )
     return DispatchResult(dispatch=dispatch, objective_eur=objective, solver_status=solver_status)
 

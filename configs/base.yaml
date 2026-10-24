@@ -14,6 +14,18 @@ grid_charging:
   import_limit_mw: null
   import_fee_eur_per_mwh: 10.0
 
+# Cycle-based battery degradation, priced per MWh charged or discharged:
+#   cost = cell_replacement_cost / (2 x cycle_life)  -> 75,000 / 15,000 = 5 EUR/MWh throughput
+# Acts as a sinking fund for cell replacement (do not add replacement capex on top).
+# 7,500 full cycles is ~72 % remaining capacity on Modo Energy's standard LFP curve;
+# 75,000 EUR/MWh is a placeholder above BNEF's 2025 stationary pack price of $70/kWh to
+# cover installation and disposal.
+degradation:
+  enabled: true
+  cell_replacement_cost_eur_per_mwh: 75000.0
+  cycle_life_full_cycles: 7500.0
+  calendar_life_years: 20.0
+
 battery:
   energy_capacity_mwh: 100.0
   charge_power_mw: 25.0
